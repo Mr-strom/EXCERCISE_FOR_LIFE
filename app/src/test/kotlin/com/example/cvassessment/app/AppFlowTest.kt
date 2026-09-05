@@ -172,4 +172,122 @@ class AppFlowTest {
         // Step 4: All required landmarks >= 0.6 for 2+ seconds sustained
         assertEquals(4, evaluateStep(hasPose = true, visibleRequiredCount = 10, isCentered = true, allAboveThreshold = true, elapsedMs = 2100L))
     }
+
+    private fun createLandmark(index: Int, x: Float, y: Float, visibility: Float): com.example.cvassessment.sdk.pose.PoseLandmark {
+        return com.example.cvassessment.sdk.pose.PoseLandmark(
+            index = index,
+            name = com.example.cvassessment.sdk.pose.PoseLandmarkType.getName(index),
+            x = x,
+            y = y,
+            z = 0.0f,
+            visibility = visibility
+        )
+    }
+
+    @Test
+    fun testPositionGuidanceFullBodyVisible() {
+        val landmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.90f),
+            createLandmark(12, 0.55f, 0.30f, 0.90f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            createLandmark(27, 0.47f, 0.80f, 0.85f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+
+        val result = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(landmarks, hasPose = true)
+        assertEquals("Full body visible", result.guidanceMessage)
+        org.junit.Assert.assertFalse(result.isWarning)
+        assertTrue(result.lowConfidenceIndices.isEmpty())
+    }
+
+    @Test
+    fun testPositionGuidanceMoveLeftHipOutOfFrame() {
+        val landmarks = listOf(
+            createLandmark(11, 0.75f, 0.30f, 0.90f),
+            createLandmark(12, 0.82f, 0.30f, 0.90f),
+            createLandmark(13, 0.70f, 0.40f, 0.85f),
+            createLandmark(14, 0.84f, 0.40f, 0.85f),
+            createLandmark(15, 0.68f, 0.50f, 0.80f),
+            createLandmark(16, 0.85f, 0.50f, 0.80f),
+            createLandmark(23, 0.80f, 0.55f, 0.90f),
+            // Right hip drifting towards right edge (X = 0.89 > 0.85)
+            createLandmark(24, 0.89f, 0.55f, 0.90f),
+            createLandmark(27, 0.78f, 0.80f, 0.85f),
+            createLandmark(28, 0.84f, 0.80f, 0.85f)
+        )
+
+        val result = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(landmarks, hasPose = true)
+        assertEquals("Move left — hip out of frame", result.guidanceMessage)
+        assertTrue(result.isWarning)
+    }
+
+    @Test
+    fun testPositionGuidanceMoveCloserArmsTooFar() {
+        val landmarks = listOf(
+            createLandmark(11, 0.48f, 0.40f, 0.90f),
+            createLandmark(12, 0.52f, 0.40f, 0.90f),
+            createLandmark(13, 0.47f, 0.45f, 0.85f),
+            createLandmark(14, 0.53f, 0.45f, 0.85f),
+            createLandmark(15, 0.46f, 0.50f, 0.80f),
+            createLandmark(16, 0.54f, 0.50f, 0.80f),
+            createLandmark(23, 0.48f, 0.52f, 0.90f),
+            createLandmark(24, 0.52f, 0.52f, 0.90f),
+            // Ankles at y = 0.60 -> bodySpan = 0.60 - 0.40 = 0.20 (< 0.28)
+            createLandmark(27, 0.48f, 0.60f, 0.85f),
+            createLandmark(28, 0.52f, 0.60f, 0.85f)
+        )
+
+        val result = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(landmarks, hasPose = true)
+        assertEquals("Move closer — arms too far", result.guidanceMessage)
+        assertTrue(result.isWarning)
+    }
+
+    @Test
+    fun testInsufficientVisibilityWhyLeftAnkleConfidenceDropped() {
+        val landmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.90f),
+            createLandmark(12, 0.55f, 0.30f, 0.90f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            // Left ankle confidence dropped below 0.40 (to 0.25f)
+            createLandmark(27, 0.47f, 0.80f, 0.25f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+
+        val result = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(landmarks, hasPose = true)
+        assertEquals("Why: Left ankle confidence dropped", result.insufficientWhyMessage)
+        assertTrue(result.lowConfidenceIndices.contains(27))
+        assertEquals("Adjust position — Left ankle confidence dropping", result.guidanceMessage)
+        assertTrue(result.isWarning)
+    }
+
+    @Test
+    fun testInsufficientVisibilityWhyJointMovedOutOfFrame() {
+        val landmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.90f),
+            createLandmark(12, 0.55f, 0.30f, 0.90f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            // Left ankle moved past bottom edge (y = 0.97 > 0.95)
+            createLandmark(27, 0.47f, 0.97f, 0.30f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+
+        val result = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(landmarks, hasPose = true)
+        assertEquals("Why: Left ankle moved out of frame", result.insufficientWhyMessage)
+        assertTrue(result.lowConfidenceIndices.contains(27))
+    }
 }

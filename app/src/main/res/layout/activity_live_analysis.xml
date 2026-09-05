@@ -61,39 +61,155 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Large Rep Counter Display -->
+        <!-- Rep Counter & Mini Landmark Visibility Panel Row -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="#CC000000"
-            android:padding="12dp"
-            android:layout_marginTop="12dp">
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
 
-            <TextView
+            <!-- Large Rep Counter Display (Left) -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="REPS"
-                android:textColor="#AAAAAA"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                android:orientation="vertical"
+                android:background="#CC000000"
+                android:padding="12dp">
 
-            <TextView
-                android:id="@+id/tvRepCounter"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="REPS"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvRepCounter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="48sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvInstantRom"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ROM: --"
+                    android:textColor="#81C784"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- 1. Mini Landmark Visibility Panel (top-right corner, small) -->
+            <LinearLayout
+                android:id="@+id/llMiniLandmarkPanel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0"
-                android:textColor="#FFFFFF"
-                android:textSize="48sp"
-                android:textStyle="bold" />
+                android:orientation="vertical"
+                android:background="#CC0D0D0D"
+                android:paddingLeft="8dp"
+                android:paddingTop="5dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="5dp">
 
-            <TextView
-                android:id="@+id/tvInstantRom"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="ROM: --"
-                android:textColor="#81C784"
-                android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvMiniPanelHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LANDMARKS"
+                    android:textColor="#888888"
+                    android:textSize="8sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.06"
+                    android:layout_marginBottom="2dp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmLeftShoulder"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LEFT_SHOULDER: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmRightShoulder"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RIGHT_SHOULDER: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmLeftElbow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LEFT_ELBOW: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmRightElbow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RIGHT_ELBOW: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmLeftWrist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LEFT_WRIST: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmRightWrist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RIGHT_WRIST: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmLeftHip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LEFT_HIP: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmRightHip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RIGHT_HIP: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmLeftAnkle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LEFT_ANKLE: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tvMiniLmRightAnkle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="RIGHT_ANKLE: 0%"
+                    android:textColor="#FF5252"
+                    android:textSize="9sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- INSUFFICIENT_VISIBILITY Banner (R10.2: Must be clearly visible when active) -->
@@ -113,16 +229,32 @@
                 android:layout_height="wrap_content"
                 android:text="⚠️"
                 android:textSize="20sp"
-                android:layout_marginEnd="8dp" />
+                android:layout_marginEnd="10dp" />
 
-            <TextView
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Can't see you clearly — adjust your position."
-                android:textColor="#FFFFFF"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvInsufficientTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Can't see you clearly — adjust your position."
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvInsufficientWhy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Why: Left ankle confidence dropped"
+                    android:textColor="#FFCDD2"
+                    android:textSize="12sp"
+                    android:layout_marginTop="3dp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Real-time Active Feedback Overlay Banner -->
@@ -144,6 +276,36 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
+
+        <!-- 2. Position Guidance Messages (subtle, bottom of screen) -->
+        <LinearLayout
+            android:id="@+id/llPositionGuidance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:background="#B3111111"
+            android:padding="8dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:id="@+id/tvPositionGuidanceIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✓"
+                android:textColor="#00E676"
+                android:textSize="14sp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/tvPositionGuidance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Full body visible"
+                android:textColor="#00E676"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <!-- Bottom Action Bar -->
         <LinearLayout
