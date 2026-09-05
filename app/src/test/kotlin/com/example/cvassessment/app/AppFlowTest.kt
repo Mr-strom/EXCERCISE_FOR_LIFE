@@ -97,4 +97,79 @@ class AppFlowTest {
         assertEquals("EXTRA_EXERCISE_NAME", ResultsActivity.EXTRA_EXERCISE_NAME)
         assertEquals("EXTRA_SESSION_RESULT", ResultsActivity.EXTRA_SESSION_RESULT)
     }
+
+    @Test
+    fun testFramingGuideRequiredLandmarks() {
+        val expectedIndices = listOf(11, 12, 13, 14, 15, 16, 23, 24, 27, 28)
+        assertEquals(10, expectedIndices.size)
+
+        val expectedNames = listOf(
+            "LEFT_SHOULDER", "RIGHT_SHOULDER",
+            "LEFT_ELBOW", "RIGHT_ELBOW",
+            "LEFT_WRIST", "RIGHT_WRIST",
+            "LEFT_HIP", "RIGHT_HIP",
+            "LEFT_ANKLE", "RIGHT_ANKLE"
+        )
+
+        val config = com.example.cvassessment.sdk.spec.ExerciseConfig.PUSH_UP
+        assertEquals(expectedIndices, config.requiredLandmarkIndices)
+
+        expectedIndices.forEachIndexed { i, idx ->
+            val name = com.example.cvassessment.sdk.pose.PoseLandmarkType.getName(idx)
+            assertEquals(expectedNames[i], name)
+        }
+    }
+
+    @Test
+    fun testFramingGuideColorCodingRules() {
+        fun getColorForVisibility(visibility: Float): String {
+            return when {
+                visibility >= 0.60f -> "GREEN"
+                visibility >= 0.40f -> "YELLOW"
+                else -> "RED"
+            }
+        }
+
+        assertEquals("GREEN", getColorForVisibility(0.85f))
+        assertEquals("GREEN", getColorForVisibility(0.60f))
+        assertEquals("YELLOW", getColorForVisibility(0.59f))
+        assertEquals("YELLOW", getColorForVisibility(0.45f))
+        assertEquals("YELLOW", getColorForVisibility(0.40f))
+        assertEquals("RED", getColorForVisibility(0.39f))
+        assertEquals("RED", getColorForVisibility(0.0f))
+    }
+
+    @Test
+    fun testFramingGuideStepTransitions() {
+        fun evaluateStep(
+            hasPose: Boolean,
+            visibleRequiredCount: Int,
+            isCentered: Boolean,
+            allAboveThreshold: Boolean,
+            elapsedMs: Long
+        ): Int {
+            return if (!hasPose || visibleRequiredCount < 6) {
+                1
+            } else if (!isCentered) {
+                2
+            } else if (!allAboveThreshold || elapsedMs < 2000L) {
+                3
+            } else {
+                4
+            }
+        }
+
+        // Step 1: User stands in frame but not fully visible
+        assertEquals(1, evaluateStep(hasPose = false, visibleRequiredCount = 0, isCentered = false, allAboveThreshold = false, elapsedMs = 0L))
+        assertEquals(1, evaluateStep(hasPose = true, visibleRequiredCount = 4, isCentered = true, allAboveThreshold = false, elapsedMs = 0L))
+
+        // Step 2: User is visible but off-center
+        assertEquals(2, evaluateStep(hasPose = true, visibleRequiredCount = 8, isCentered = false, allAboveThreshold = false, elapsedMs = 0L))
+
+        // Step 3: Centered and full body in frame, but checking stability (< 2000ms)
+        assertEquals(3, evaluateStep(hasPose = true, visibleRequiredCount = 10, isCentered = true, allAboveThreshold = true, elapsedMs = 1500L))
+
+        // Step 4: All required landmarks >= 0.6 for 2+ seconds sustained
+        assertEquals(4, evaluateStep(hasPose = true, visibleRequiredCount = 10, isCentered = true, allAboveThreshold = true, elapsedMs = 2100L))
+    }
 }

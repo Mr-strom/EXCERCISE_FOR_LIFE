@@ -10,21 +10,34 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 2. Dark Gradient / Scrim Overlay for Legibility -->
-    <LinearLayout
+    <!-- 2. Step 1 Framing Box Overlay -->
+    <com.example.cvassessment.app.ui.FramingGuideOverlayView
+        android:id="@+id/framingGuideOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 3. Skeleton Pose Overlay -->
+    <com.example.cvassessment.app.ui.PoseOverlayView
+        android:id="@+id/startPoseOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 4. Interactive Guidance & Controls Layer -->
+    <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="16dp">
 
         <!-- Top Header & Lens Switcher -->
         <LinearLayout
+            android:id="@+id/llTopBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:background="#B0000000"
-            android:padding="12dp">
+            android:padding="10dp">
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -38,14 +51,14 @@
                     android:layout_height="wrap_content"
                     android:text="Push-Up"
                     android:textColor="#FFFFFF"
-                    android:textSize="18sp"
+                    android:textSize="17sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Camera &amp; Framing Setup"
-                    android:textColor="#AAAAAA"
+                    android:text="Interactive Framing Guide"
+                    android:textColor="#81C784"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -57,105 +70,247 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <!-- Framing Guidance Card -->
+        <!-- Step 3: Guided Instructions Banner (Non-Invasive Text at Top) -->
         <LinearLayout
+            android:id="@+id/llGuidedInstructions"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_below="@id/llTopBar"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#E61A1A1A"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/tvStepBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="#4CAF50"
+                android:textColor="#FFFFFF"
+                android:text="GUIDE"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:paddingLeft="8dp"
+                android:paddingTop="3dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="3dp"
+                android:layout_marginEnd="10dp" />
+
+            <TextView
+                android:id="@+id/tvGuidedStep"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Step 1: Stand back — we need to see your full body"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Step 2: Real-Time Landmark Visibility Indicators (Right-side vertical list) -->
+        <LinearLayout
+            android:id="@+id/llLandmarkPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/llGuidedInstructions"
+            android:layout_alignParentEnd="true"
+            android:layout_marginTop="10dp"
             android:orientation="vertical"
-            android:background="#CC1A1A1A"
-            android:padding="16dp"
-            android:layout_marginTop="16dp">
+            android:background="#CC0D0D0D"
+            android:paddingLeft="10dp"
+            android:paddingTop="8dp"
+            android:paddingRight="10dp"
+            android:paddingBottom="8dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="📐 Framing Guidance"
-                android:textColor="#4CAF50"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:text="REQUIRED JOINTS"
+                android:textColor="#888888"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:layout_marginBottom="4dp" />
 
+            <TextView
+                android:id="@+id/tvLmLeftShoulder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEFT_SHOULDER: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmRightShoulder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RIGHT_SHOULDER: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmLeftElbow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEFT_ELBOW: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmRightElbow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RIGHT_ELBOW: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmLeftWrist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEFT_WRIST: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmRightWrist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RIGHT_WRIST: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmLeftHip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEFT_HIP: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmRightHip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RIGHT_HIP: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmLeftAnkle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LEFT_ANKLE: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp"
+                android:layout_marginBottom="2dp" />
+
+            <TextView
+                android:id="@+id/tvLmRightAnkle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RIGHT_ANKLE: 0%"
+                android:textColor="#FF5252"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <!-- Bottom Controls & Countdown Section -->
+        <LinearLayout
+            android:id="@+id/llBottomSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentBottom="true"
+            android:orientation="vertical">
+
+            <!-- Error Panel (Hidden by default) -->
+            <LinearLayout
+                android:id="@+id/panelCameraError"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="#E6800020"
+                android:padding="12dp"
+                android:layout_marginBottom="8dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvErrorMessage"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Camera is unavailable or permission denied."
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp">
+
+                    <Button
+                        android:id="@+id/btnRetryCamera"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Retry Camera" />
+
+                    <Button
+                        android:id="@+id/btnOpenSettings"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Open Settings"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Framing Guidance Note -->
             <TextView
                 android:id="@+id/tvFramingGuidance"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Side view most accurate for elbow angle; front/45° usable with reduced ROM precision. Ensure whole body is visible from head to toes."
-                android:textColor="#DDDDDD"
-                android:textSize="13sp"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
+                android:background="#B3000000"
+                android:padding="8dp"
+                android:text="Side view most accurate for elbow angle. Ensure whole body is visible."
+                android:textColor="#CCCCCC"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:layout_marginBottom="6dp" />
 
-        <!-- Spacer -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <!-- Error Panel (Hidden by default) -->
-        <LinearLayout
-            android:id="@+id/panelCameraError"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="#E6800020"
-            android:padding="16dp"
-            android:layout_marginBottom="12dp"
-            android:visibility="gone">
-
+            <!-- Step 4: Countdown Timer Indicator -->
             <TextView
-                android:id="@+id/tvErrorMessage"
+                android:id="@+id/tvCountdownTimer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Camera is unavailable or permission denied."
-                android:textColor="#FFFFFF"
-                android:textSize="13sp" />
+                android:background="#D9000000"
+                android:padding="8dp"
+                android:text="Position in target zone to start timer..."
+                android:textColor="#FFB74D"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="8dp" />
 
-            <LinearLayout
+            <!-- Step 4: Start Exercise Button -->
+            <Button
+                android:id="@+id/btnStartExercise"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="10dp">
-
-                <Button
-                    android:id="@+id/btnRetryCamera"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Retry Camera" />
-
-                <Button
-                    android:id="@+id/btnOpenSettings"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Open Settings"
-                    android:layout_marginStart="8dp" />
-            </LinearLayout>
+                android:layout_height="56dp"
+                android:text="Start Exercise"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:enabled="false" />
         </LinearLayout>
 
-        <!-- Detection Status Indicator -->
-        <TextView
-            android:id="@+id/tvDetectionStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="#D9000000"
-            android:padding="12dp"
-            android:text="Waiting for camera..."
-            android:textColor="#FFB74D"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:layout_marginBottom="12dp" />
-
-        <!-- Start Button -->
-        <Button
-            android:id="@+id/btnStartExercise"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="Start Exercise"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:enabled="false" />
-
-    </LinearLayout>
+    </RelativeLayout>
 
 </FrameLayout>

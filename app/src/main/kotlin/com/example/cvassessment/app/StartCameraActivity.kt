@@ -19,18 +19,24 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.example.cvassessment.app.camera.AndroidCameraFrame
 import com.example.cvassessment.app.camera.CameraCapturePipeline
+import com.example.cvassessment.app.ui.FramingGuideOverlayView
+import com.example.cvassessment.app.ui.PoseOverlayView
 import com.example.cvassessment.sdk.pose.PoseEstimator
+import com.example.cvassessment.sdk.pose.PoseLandmark
+import com.example.cvassessment.sdk.pose.PoseLandmarkType
 import com.example.cvassessment.sdk.spec.ExerciseRegistry
+import kotlin.math.ceil
 
 /**
- * Screen 2 — Start Camera (per ANDROID_FLOW.md).
+ * Screen 2 — Start Camera with Interactive Framing Guide (per ANDROID_FLOW.md).
  *
- * Confirms camera permission and user framing before live analysis begins.
- * - Live camera preview (rear camera default, toggle to front camera available).
- * - Displays on-screen framing guidance from EXERCISE_SPEC.md cameraNotes.
- * - "Start" button is disabled until camera permission is granted AND at least
- *   a minimal body pose is detected in the preview.
- * - Handles camera unavailable error and permission denial with retry / settings actions.
+ * Teaches user where and how to position themselves BEFORE starting the exercise:
+ * 1. Framing Box Overlay: Center target zone labeled "Keep full body here".
+ * 2. Real-Time Landmark Indicators: Required joints list (shoulders, elbows, wrists, hips, ankles)
+ *    color-coded (>=0.60 green, 0.40..0.59 yellow, <0.40 red) updating every frame.
+ * 3. Guided Instructions: Non-invasive step banner at top progressing from Step 1 to Step 4.
+ * 4. Start Button Logic: Only enabled when ALL required landmarks are >= 0.60 for 2+ seconds sustained,
+ *    showing live countdown timer "Ready in: 2 seconds..." and changing text to "START EXERCISE (Ready!)".
  */
 class StartCameraActivity : AppCompatActivity() {
 
@@ -39,25 +45,37 @@ class StartCameraActivity : AppCompatActivity() {
         const val EXTRA_EXERCISE_NAME = "EXTRA_EXERCISE_NAME"
         private const val TAG = "StartCameraActivity"
         private const val MODEL_ASSET = "pose_landmarker_full.task"
+        private const val REQUIRED_SUSTAINED_DURATION_MS = 2000L
+        private const val VISIBILITY_THRESHOLD = 0.60f
     }
 
     private lateinit var cameraCapturePipeline: CameraCapturePipeline
     private lateinit var poseEstimator: PoseEstimator
 
     private lateinit var previewView: PreviewView
+    private lateinit var framingGuideOverlay: FramingGuideOverlayView
+    private lateinit var poseOverlayView: PoseOverlayView
+
     private lateinit var tvExerciseTitle: TextView
     private lateinit var tvFramingGuidance: TextView
-    private lateinit var tvDetectionStatus: TextView
+    private lateinit var tvGuidedStep: TextView
+    private lateinit var tvCountdownTimer: TextView
     private lateinit var btnSwitchCamera: Button
     private lateinit var btnStartExercise: Button
+
     private lateinit var panelCameraError: LinearLayout
     private lateinit var tvErrorMessage: TextView
     private lateinit var btnRetryCamera: Button
     private lateinit var btnOpenSettings: Button
 
+    // Landmark list TextView references
+    private lateinit var landmarkViews: Map<Int, Pair<String, TextView>>
+
     private var exerciseId: String = "push_up"
     private var exerciseName: String = "Push-Up"
-    private var isPoseDetected = false
+
+    // Timing state for the 2+ seconds sustained stability requirement
+    private var sustainedStartTimeMs: Long = 0L
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -84,11 +102,16 @@ class StartCameraActivity : AppCompatActivity() {
 
         // Initialize UI view references
         previewView = findViewById(R.id.startCameraPreview)
+        framingGuideOverlay = findViewById(R.id.framingGuideOverlay)
+        poseOverlayView = findViewById(R.id.startPoseOverlay)
+
         tvExerciseTitle = findViewById(R.id.tvStartExerciseTitle)
         tvFramingGuidance = findViewById(R.id.tvFramingGuidance)
-        tvDetectionStatus = findViewById(R.id.tvDetectionStatus)
+        tvGuidedStep = findViewById(R.id.tvGuidedStep)
+        tvCountdownTimer = findViewById(R.id.tvCountdownTimer)
         btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
         btnStartExercise = findViewById(R.id.btnStartExercise)
+
         panelCameraError = findViewById(R.id.panelCameraError)
         tvErrorMessage = findViewById(R.id.tvErrorMessage)
         btnRetryCamera = findViewById(R.id.btnRetryCamera)
@@ -96,24 +119,39 @@ class StartCameraActivity : AppCompatActivity() {
 
         tvExerciseTitle.text = exerciseName
 
+        // Required landmarks for Push-Up: shoulders, elbows, wrists, hips, ankles (10 joints)
+        landmarkViews = mapOf(
+            PoseLandmarkType.LEFT_SHOULDER to Pair("LEFT_SHOULDER", findViewById(R.id.tvLmLeftShoulder)),
+            PoseLandmarkType.RIGHT_SHOULDER to Pair("RIGHT_SHOULDER", findViewById(R.id.tvLmRightShoulder)),
+            PoseLandmarkType.LEFT_ELBOW to Pair("LEFT_ELBOW", findViewById(R.id.tvLmLeftElbow)),
+            PoseLandmarkType.RIGHT_ELBOW to Pair("RIGHT_ELBOW", findViewById(R.id.tvLmRightElbow)),
+            PoseLandmarkType.LEFT_WRIST to Pair("LEFT_WRIST", findViewById(R.id.tvLmLeftWrist)),
+            PoseLandmarkType.RIGHT_WRIST to Pair("RIGHT_WRIST", findViewById(R.id.tvLmRightWrist)),
+            PoseLandmarkType.LEFT_HIP to Pair("LEFT_HIP", findViewById(R.id.tvLmLeftHip)),
+            PoseLandmarkType.RIGHT_HIP to Pair("RIGHT_HIP", findViewById(R.id.tvLmRightHip)),
+            PoseLandmarkType.LEFT_ANKLE to Pair("LEFT_ANKLE", findViewById(R.id.tvLmLeftAnkle)),
+            PoseLandmarkType.RIGHT_ANKLE to Pair("RIGHT_ANKLE", findViewById(R.id.tvLmRightAnkle))
+        )
+
         // Load camera guidance notes from config registry
         try {
             val config = ExerciseRegistry.getConfig(exerciseId)
             tvFramingGuidance.text = config.cameraNotes
         } catch (e: Exception) {
-            tvFramingGuidance.text = "Position camera to capture your entire body throughout the movement."
+            tvFramingGuidance.text = "Side view most accurate for elbow angle. Ensure whole body is visible."
         }
 
-        // Initialize PoseEstimator for pre-check
+        // Initialize PoseEstimator for framing guide pre-check
         poseEstimator = PoseEstimator(this, MODEL_ASSET)
 
         // Initialize CameraCapturePipeline
         cameraCapturePipeline = CameraCapturePipeline(this)
         cameraCapturePipeline.setFrameCallback { frame, timestampMs ->
-            processFrameForPosePreCheck(frame, timestampMs)
+            processFrameForFramingGuide(frame, timestampMs)
         }
 
         btnSwitchCamera.setOnClickListener {
+            poseOverlayView.clear()
             cameraCapturePipeline.toggleCamera(this, previewView)
             updateSwitchButtonText()
         }
@@ -143,25 +181,134 @@ class StartCameraActivity : AppCompatActivity() {
         checkAndRequestCameraPermission()
     }
 
-    private fun processFrameForPosePreCheck(frame: com.example.cvassessment.sdk.CameraFrame, timestampMs: Long) {
+    private fun processFrameForFramingGuide(frame: com.example.cvassessment.sdk.CameraFrame, timestampMs: Long) {
         val androidFrame = frame as? AndroidCameraFrame ?: return
         val bitmap = androidFrame.bitmap ?: return
 
+        // 1. Detect body pose with BlazePose
         val poseResult = poseEstimator.detect(bitmap, timestampMs)
         val hasPose = poseResult.hasPose && poseResult.landmarks.isNotEmpty()
+        val detectedLandmarks = poseResult.landmarks
+        val landmarkMap = detectedLandmarks.associateBy { it.index }
 
-        if (hasPose != isPoseDetected) {
-            isPoseDetected = hasPose
-            runOnUiThread {
-                if (hasPose) {
-                    tvDetectionStatus.text = "✓ Person detected — ready to begin!"
-                    tvDetectionStatus.setTextColor(Color.parseColor("#4CAF50"))
-                    btnStartExercise.isEnabled = true
-                } else {
-                    tvDetectionStatus.text = "Waiting for person to enter frame..."
-                    tvDetectionStatus.setTextColor(Color.parseColor("#FFB74D"))
-                    btnStartExercise.isEnabled = false
+        val isFront = (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT)
+
+        // 2. Evaluate visibility for all 10 required landmarks
+        var allAboveThreshold = hasPose
+        val landmarkStats = mutableListOf<Pair<String, Float>>()
+
+        landmarkViews.forEach { (index, info) ->
+            val lm = landmarkMap[index]
+            val vis = lm?.visibility ?: 0.0f
+            landmarkStats.add(Pair(info.first, vis))
+            if (vis < VISIBILITY_THRESHOLD) {
+                allAboveThreshold = false
+            }
+        }
+
+        // 3. Determine Guided Step (Step 1 to Step 4)
+        val visibleRequiredCount = landmarkStats.count { it.second >= 0.40f }
+        val avgTorsoX = listOfNotNull(
+            landmarkMap[PoseLandmarkType.LEFT_SHOULDER]?.x,
+            landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]?.x,
+            landmarkMap[PoseLandmarkType.LEFT_HIP]?.x,
+            landmarkMap[PoseLandmarkType.RIGHT_HIP]?.x
+        ).average()
+
+        val isCentered = if (avgTorsoX.isNaN()) false else (avgTorsoX in 0.35..0.65)
+
+        // 4. Manage 2-second stability countdown
+        val isStableReady: Boolean
+        val countdownMessage: String
+        val currentStepText: String
+
+        if (!hasPose || visibleRequiredCount < 6) {
+            // User is either absent or too close / partially framed
+            sustainedStartTimeMs = 0L
+            isStableReady = false
+            currentStepText = "Step 1: Stand back — we need to see your full body"
+            countdownMessage = "Position full body inside the box..."
+        } else if (!isCentered) {
+            // User is detected but off to the side
+            sustainedStartTimeMs = 0L
+            isStableReady = false
+            currentStepText = "Step 2: Move to center of frame"
+            countdownMessage = "Move to center of frame..."
+        } else if (!allAboveThreshold) {
+            // User is centered, but joints are occluded or below 0.60
+            sustainedStartTimeMs = 0L
+            isStableReady = false
+            currentStepText = "Step 3: Stand still — checking pose quality"
+            countdownMessage = "Ensure arms and legs are not blocked..."
+        } else {
+            // All 10 required landmarks are >= 0.60 and user is centered
+            if (sustainedStartTimeMs == 0L) {
+                sustainedStartTimeMs = timestampMs
+            }
+            val elapsedMs = timestampMs - sustainedStartTimeMs
+
+            if (elapsedMs < REQUIRED_SUSTAINED_DURATION_MS) {
+                val remainingSec = ceil((REQUIRED_SUSTAINED_DURATION_MS - elapsedMs) / 1000.0).toInt()
+                isStableReady = false
+                currentStepText = "Step 3: Stand still — checking pose quality"
+                countdownMessage = "Ready in: $remainingSec seconds..."
+            } else {
+                isStableReady = true
+                currentStepText = "Step 4: Perfect! Tap START EXERCISE"
+                countdownMessage = "✓ Ready to begin!"
+            }
+        }
+
+        // 5. Update UI on Main Thread
+        runOnUiThread {
+            // Draw skeleton overlay
+            if (hasPose) {
+                poseOverlayView.updatePose(
+                    detectedLandmarks = detectedLandmarks,
+                    frameWidth = frame.width,
+                    frameHeight = frame.height,
+                    isFront = isFront
+                )
+            } else {
+                poseOverlayView.clear()
+            }
+
+            // Update Step 1 Framing box satisfied status (turns green when stable)
+            framingGuideOverlay.setTargetSatisfied(isStableReady)
+
+            // Update Step 3 Guided Instructions text
+            tvGuidedStep.text = currentStepText
+
+            // Update Step 2 Landmark Indicators list (Name + Confidence % + Color)
+            landmarkViews.forEach { (index, info) ->
+                val vis = landmarkMap[index]?.visibility ?: 0.0f
+                val pct = (vis * 100).toInt()
+                val tv = info.second
+
+                tv.text = "${info.first}: $pct%"
+
+                // Color coding per specification:
+                // GREEN if >= 0.60, YELLOW if 0.40..0.59, RED if < 0.40
+                when {
+                    vis >= 0.60f -> tv.setTextColor(Color.parseColor("#00E676")) // Bright green
+                    vis >= 0.40f -> tv.setTextColor(Color.parseColor("#FFD54F")) // Amber yellow
+                    else -> tv.setTextColor(Color.parseColor("#FF5252"))         // Red
                 }
+            }
+
+            // Update Step 4 Button & Countdown indicator
+            tvCountdownTimer.text = countdownMessage
+
+            if (isStableReady) {
+                tvCountdownTimer.setTextColor(Color.parseColor("#00E676"))
+                btnStartExercise.isEnabled = true
+                btnStartExercise.text = "START EXERCISE (Ready!)"
+                btnStartExercise.setTextColor(Color.parseColor("#00E676"))
+            } else {
+                tvCountdownTimer.setTextColor(Color.parseColor("#FFB74D"))
+                btnStartExercise.isEnabled = false
+                btnStartExercise.text = "Start Exercise"
+                btnStartExercise.setTextColor(Color.parseColor("#AAAAAA"))
             }
         }
     }
@@ -183,13 +330,9 @@ class StartCameraActivity : AppCompatActivity() {
 
     private fun startCameraPreview() {
         try {
-            tvDetectionStatus.text = "Starting camera..."
-            tvDetectionStatus.setTextColor(Color.parseColor("#FFB74D"))
+            tvGuidedStep.text = "Step 1: Stand back — we need to see your full body"
             cameraCapturePipeline.startCamera(this, previewView) {
                 updateSwitchButtonText()
-                runOnUiThread {
-                    tvDetectionStatus.text = "Waiting for person to enter frame..."
-                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start camera", e)
@@ -203,8 +346,7 @@ class StartCameraActivity : AppCompatActivity() {
             tvErrorMessage.text = message
             btnOpenSettings.visibility = if (showSettingsButton) View.VISIBLE else View.GONE
             btnStartExercise.isEnabled = false
-            tvDetectionStatus.text = "Camera Unavailable"
-            tvDetectionStatus.setTextColor(Color.parseColor("#E53935"))
+            tvGuidedStep.text = "Camera Unavailable"
         }
     }
 
