@@ -414,4 +414,169 @@ class AppFlowTest {
         assertEquals("Step into frame — no person detected", result.headline)
         assertTrue(result.canStartAnyway)
     }
+
+    @Test
+    fun testActionableInsufficientVisibilityMessaging() {
+        // 1. No person detected
+        val noPersonResult = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(
+            landmarks = emptyList(),
+            hasPose = false
+        )
+        assertEquals("Can't see you clearly — step into camera view", noPersonResult.actionableInsufficientMessage)
+
+        // 2. Feet cut off (ankle y = 0.95 > 0.88)
+        val feetCutOff = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.90f),
+            createLandmark(12, 0.55f, 0.30f, 0.90f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            createLandmark(27, 0.47f, 0.95f, 0.85f),
+            createLandmark(28, 0.53f, 0.95f, 0.85f)
+        )
+        val feetResult = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(
+            landmarks = feetCutOff,
+            hasPose = true
+        )
+        assertEquals("Can't see you clearly — step back a bit", feetResult.actionableInsufficientMessage)
+
+        // 3. Moved too far right (hip x = 0.92 > 0.85)
+        val movedOutRight = listOf(
+            createLandmark(11, 0.82f, 0.30f, 0.90f),
+            createLandmark(12, 0.90f, 0.30f, 0.90f),
+            createLandmark(13, 0.80f, 0.40f, 0.85f),
+            createLandmark(14, 0.92f, 0.40f, 0.85f),
+            createLandmark(15, 0.78f, 0.50f, 0.80f),
+            createLandmark(16, 0.94f, 0.50f, 0.80f),
+            createLandmark(23, 0.85f, 0.55f, 0.90f),
+            createLandmark(24, 0.92f, 0.55f, 0.90f),
+            createLandmark(27, 0.86f, 0.80f, 0.85f),
+            createLandmark(28, 0.92f, 0.80f, 0.85f)
+        )
+        val centerResult = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(
+            landmarks = movedOutRight,
+            hasPose = true
+        )
+        assertEquals("Can't see you clearly — move toward center", centerResult.actionableInsufficientMessage)
+    }
+
+    @Test
+    fun testExerciseAnalyzerCompletedRepMetricsAndFormScore() {
+        val analyzer = com.example.cvassessment.sdk.ExerciseAnalyzer("push_up", "Push-Up")
+        assertNull(analyzer.latestCompletedRepMetrics)
+        assertTrue(analyzer.allRepMetrics.isEmpty())
+        assertEquals(100, analyzer.getRepFormScore(1))
+
+        // Simulate 1 complete rep: top (165°) -> bottom (85°) -> top (165°)
+        var time = 1000L
+        analyzer.analyzeSyntheticFrame(165.0f, 175.0f, time)
+        time += 500
+        analyzer.analyzeSyntheticFrame(130.0f, 175.0f, time)
+        time += 500
+        analyzer.analyzeSyntheticFrame(85.0f, 175.0f, time)
+        time += 500
+        analyzer.analyzeSyntheticFrame(130.0f, 175.0f, time)
+        time += 500
+        val finishResult = analyzer.analyzeSyntheticFrame(165.0f, 175.0f, time)
+
+        assertEquals(1, finishResult.currentReps)
+        assertNotNull(analyzer.latestCompletedRepMetrics)
+        assertEquals(1, analyzer.latestCompletedRepMetrics!!.repIndex)
+        assertTrue("ROM should be >= 90%", analyzer.latestCompletedRepMetrics!!.romPercent >= 90f)
+        assertEquals(100, analyzer.getRepFormScore(1))
+    }
+
+    @Test
+    fun testLiveAnalysisActivityConstants() {
+        assertEquals("com.example.cvassessment.TEST_FORM_ERROR", LiveAnalysisActivity.ACTION_TEST_FORM_ERROR)
+        assertEquals("EXTRA_SIMULATE_FORM_ERROR", LiveAnalysisActivity.EXTRA_SIMULATE_FORM_ERROR)
+    }
+
+    @Test
+    fun testTtsFeedbackControllerSuccessfulLifecycleAndLogging() {
+        val spokenMessages = mutableListOf<String>()
+        val logOutput = mutableListOf<String>()
+
+        val controller = com.example.cvassessment.app.ui.TtsFeedbackController(
+            speakDelegate = { text ->
+                spokenMessages.add(text)
+                android.speech.tts.TextToSpeech.SUCCESS
+            },
+            setLanguageDelegate = {
+                android.speech.tts.TextToSpeech.LANG_AVAILABLE
+            },
+            logInfo = { logOutput.add("INFO: $it") },
+            logWarn = { logOutput.add("WARN: $it") },
+            logError = { logOutput.add("ERROR: $it") }
+        )
+
+        // 1. Initially not initialized
+        org.junit.Assert.assertFalse(controller.isInitialized)
+
+        // 2. onInit succeeds
+        controller.onInit(android.speech.tts.TextToSpeech.SUCCESS)
+        assertTrue(controller.isInitialized)
+        assertTrue(logOutput.any { it.contains("TTS initialized successfully (status: SUCCESS)") })
+
+        // 3. speak() called when initialized
+        val spoken = controller.speak("Keep your hips up.")
+        assertTrue(spoken)
+        assertEquals(listOf("Keep your hips up."), spokenMessages)
+        assertTrue(logOutput.any { it == "INFO: TTS speaking: Keep your hips up." })
+    }
+
+    @Test
+    fun testTtsFeedbackControllerQueuesMessageBeforeInitCompletes() {
+        val spokenMessages = mutableListOf<String>()
+        val logOutput = mutableListOf<String>()
+
+        val controller = com.example.cvassessment.app.ui.TtsFeedbackController(
+            speakDelegate = { text ->
+                spokenMessages.add(text)
+                android.speech.tts.TextToSpeech.SUCCESS
+            },
+            setLanguageDelegate = {
+                android.speech.tts.TextToSpeech.LANG_AVAILABLE
+            },
+            logInfo = { logOutput.add("INFO: $it") },
+            logWarn = { logOutput.add("WARN: $it") },
+            logError = { logOutput.add("ERROR: $it") }
+        )
+
+        // 1. Form error occurs BEFORE onInit callback fires
+        val spokenPremature = controller.speak("Keep your hips up.")
+        org.junit.Assert.assertFalse("Should not speak before init", spokenPremature)
+        assertEquals("Keep your hips up.", controller.pendingMessage)
+        assertTrue(spokenMessages.isEmpty())
+        assertTrue(logOutput.any { it.contains("TTS not initialized yet. Queuing message: Keep your hips up.") })
+
+        // 2. onInit callback completes asynchronously
+        controller.onInit(android.speech.tts.TextToSpeech.SUCCESS)
+
+        // 3. Verify queued message was automatically spoken and logged
+        assertTrue(controller.isInitialized)
+        assertNull(controller.pendingMessage)
+        assertEquals(listOf("Keep your hips up."), spokenMessages)
+        assertTrue(logOutput.any { it == "INFO: TTS speaking: Keep your hips up." })
+    }
+
+    @Test
+    fun testTtsFeedbackControllerHandlesInitErrorExplicitly() {
+        val logOutput = mutableListOf<String>()
+
+        val controller = com.example.cvassessment.app.ui.TtsFeedbackController(
+            speakDelegate = { android.speech.tts.TextToSpeech.SUCCESS },
+            setLanguageDelegate = { android.speech.tts.TextToSpeech.LANG_AVAILABLE },
+            logInfo = { logOutput.add("INFO: $it") },
+            logWarn = { logOutput.add("WARN: $it") },
+            logError = { logOutput.add("ERROR: $it") }
+        )
+
+        controller.onInit(android.speech.tts.TextToSpeech.ERROR)
+        org.junit.Assert.assertFalse(controller.isInitialized)
+        assertTrue(logOutput.any { it.contains("TTS initialization failed with code: -1 (TextToSpeech.ERROR)") })
+    }
 }

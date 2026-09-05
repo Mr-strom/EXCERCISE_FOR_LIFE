@@ -2,6 +2,7 @@ package com.example.cvassessment.sdk
 
 import com.example.cvassessment.sdk.form.FormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
+import com.example.cvassessment.sdk.metrics.RepMetrics
 import com.example.cvassessment.sdk.output.OutputGate
 import com.example.cvassessment.sdk.pose.PoseEstimationResult
 import com.example.cvassessment.sdk.pose.PoseEstimator
@@ -176,6 +177,29 @@ class ExerciseAnalyzer(
     }
 
     /**
+     * Metrics of the most recently completed repetition, or null if no reps have finished yet.
+     */
+    val latestCompletedRepMetrics: RepMetrics?
+        get() = metricsEngine.latestCompletedRepMetrics
+
+    /**
+     * History of all completed repetition metrics recorded so far in the session.
+     */
+    val allRepMetrics: List<RepMetrics>
+        get() = metricsEngine.allRepMetrics
+
+    /**
+     * Computes the Form score (0-100%) for a specific completed repetition index based on detected form errors.
+     */
+    fun getRepFormScore(repIndex: Int): Int {
+        val repErrors = formRuleEngine.allSessionErrors.filter { it.repIndex == repIndex }
+        if (repErrors.isEmpty()) return 100
+        val totalDeduction = repErrors.map { it.severity }.sum()
+        val score = ((1.0f - totalDeduction).coerceIn(0.0f, 1.0f) * 100).toInt()
+        return score
+    }
+
+    /**
      * Resets all internal pipeline states.
      */
     fun reset() {
@@ -185,3 +209,4 @@ class ExerciseAnalyzer(
         formRuleEngine.reset()
     }
 }
+

@@ -13,7 +13,8 @@ object PositionGuidanceEvaluator {
         val guidanceMessage: String,
         val isWarning: Boolean,
         val insufficientWhyMessage: String,
-        val lowConfidenceIndices: Set<Int>
+        val lowConfidenceIndices: Set<Int>,
+        val actionableInsufficientMessage: String = "Can't see you clearly — adjust your position"
     )
 
     fun formatFriendlyName(index: Int): String {
@@ -45,7 +46,8 @@ object PositionGuidanceEvaluator {
                 guidanceMessage = "Step into frame — no person detected",
                 isWarning = true,
                 insufficientWhyMessage = "Why: No person detected in camera frame",
-                lowConfidenceIndices = requiredIndices.toSet()
+                lowConfidenceIndices = requiredIndices.toSet(),
+                actionableInsufficientMessage = "Can't see you clearly — step into camera view"
             )
         }
 
@@ -151,11 +153,21 @@ object PositionGuidanceEvaluator {
             }
         }
 
+        // Actionable single-line message for INSUFFICIENT_VISIBILITY (Screen 2 clean style)
+        val actionableInsufficientMessage = when {
+            maxAnkleY > 0.88f || minShoulderY < 0.08f -> "Can't see you clearly — step back a bit"
+            bodySpan > 0.0 && bodySpan < 0.28 -> "Can't see you clearly — step closer"
+            maxHipX > 0.85f || minHipX < 0.15f || maxShoulderX > 0.88f || minShoulderX < 0.12f -> "Can't see you clearly — move toward center"
+            worstLandmarkInfo != null && (worstLandmarkInfo.first == PoseLandmarkType.LEFT_ANKLE || worstLandmarkInfo.first == PoseLandmarkType.RIGHT_ANKLE) -> "Can't see you clearly — step back a bit"
+            else -> "Can't see you clearly — adjust your position"
+        }
+
         return GuidanceResult(
             guidanceMessage = guidanceMessage,
             isWarning = isWarning,
             insufficientWhyMessage = whyMessage,
-            lowConfidenceIndices = lowConfidenceIndices
+            lowConfidenceIndices = lowConfidenceIndices,
+            actionableInsufficientMessage = actionableInsufficientMessage
         )
     }
 }

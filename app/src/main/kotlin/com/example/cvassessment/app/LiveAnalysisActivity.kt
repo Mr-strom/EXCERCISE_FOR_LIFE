@@ -1,7 +1,11 @@
 package com.example.cvassessment.app
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
@@ -17,10 +21,10 @@ import com.example.cvassessment.app.camera.AndroidCameraFrame
 import com.example.cvassessment.app.camera.CameraCapturePipeline
 import com.example.cvassessment.app.ui.PoseOverlayView
 import com.example.cvassessment.app.ui.PositionGuidanceEvaluator
+import com.example.cvassessment.app.ui.TtsFeedbackController
 import com.example.cvassessment.sdk.ExerciseAnalyzer
 import com.example.cvassessment.sdk.ValidationStatus
 import com.example.cvassessment.sdk.pose.PoseEstimator
-import com.example.cvassessment.sdk.pose.PoseLandmarkType
 import java.util.Locale
 
 /**
@@ -28,13 +32,11 @@ import java.util.Locale
  *
  * Real-time SDK-driven computer vision assessment while the user exercises.
  * - Live camera preview with BlazePose skeleton overlay.
- * - Real-time rep counter updated per-frame from SDK FrameResult.
- * - Subtle ValidationStatus chip ("TRACKING" vs "INSUFFICIENT_VISIBILITY").
- * - Prominent on-screen banner when INSUFFICIENT_VISIBILITY triggers (R10.2).
- * - "Why: <Landmark> dropped" diagnostic explanation on visibility failure.
- * - Mini Landmark Visibility Panel at top-right with real-time green/yellow/red and red flash.
- * - Proactive Position Guidance at bottom ("Full body visible", "Move left", etc.).
- * - Spoken audio feedback cues via Android TextToSpeech for SDK FeedbackEvents.
+ * - Large, clear Rep counter.
+ * - Simple status chip: "Tracking well" (green) or "Adjust position" (red).
+ * - Completed rep metrics (ROM / TuT / Form) displayed only when a rep completes.
+ * - Simplified INSUFFICIENT_VISIBILITY messaging: single actionable line matching Screen 2.
+ * - Spoken audio feedback cues via Android TextToSpeech with explicit logging and ready queue.
  * - "End Session" button finalizes the session and transitions to Screen 4.
  */
 class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -43,6 +45,8 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         const val EXTRA_EXERCISE_ID = "EXTRA_EXERCISE_ID"
         const val EXTRA_EXERCISE_NAME = "EXTRA_EXERCISE_NAME"
         const val EXTRA_LENS_FACING = "EXTRA_LENS_FACING"
+        const val EXTRA_SIMULATE_FORM_ERROR = "EXTRA_SIMULATE_FORM_ERROR"
+        const val ACTION_TEST_FORM_ERROR = "com.example.cvassessment.TEST_FORM_ERROR"
         private const val TAG = "LiveAnalysisActivity"
         private const val MODEL_ASSET = "pose_landmarker_full.task"
         private const val VISIBILITY_AUDIO_COOLDOWN_MS = 5000L
@@ -57,31 +61,36 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tvExerciseName: TextView
     private lateinit var chipValidationStatus: TextView
     private lateinit var tvRepCounter: TextView
-    private lateinit var tvInstantRom: TextView
+    private lateinit var tvCompletedRepMetrics: TextView
     private lateinit var bannerInsufficientVisibility: LinearLayout
-    private lateinit var tvInsufficientWhy: TextView
+    private lateinit var tvInsufficientMessage: TextView
     private lateinit var tvLiveFeedback: TextView
     private lateinit var btnLiveFlipCamera: Button
     private lateinit var btnEndSession: Button
 
-    // 1. Mini Landmark Visibility Panel UI
-    private lateinit var llMiniLandmarkPanel: LinearLayout
-    private lateinit var tvMiniPanelHeader: TextView
-    private val miniLandmarkViews = mutableListOf<Pair<Int, Pair<String, TextView>>>()
-
-    // 2. Position Guidance UI (subtle, bottom of screen)
+    // Position Guidance UI (subtle, bottom of screen)
     private lateinit var llPositionGuidance: LinearLayout
     private lateinit var tvPositionGuidance: TextView
     private lateinit var tvPositionGuidanceIcon: TextView
 
     private var tts: TextToSpeech? = null
-    private var isTtsInitialized = false
+    internal lateinit var ttsController: TtsFeedbackController
     private var lastSpokenFeedback: String? = null
     private var lastVisibilityWarningTimestamp = 0L
+    private var lastCompletedRepCount: Int = 0
 
     private var exerciseId: String = "push_up"
     private var exerciseName: String = "Push-Up"
     private var initialLensFacing: Int = CameraSelector.LENS_FACING_BACK
+
+    private val testReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_TEST_FORM_ERROR) {
+                val error = intent.getStringExtra("error") ?: "hips_dropping"
+                triggerFormErrorForTesting(error)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,28 +106,12 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tvExerciseName = findViewById(R.id.tvLiveExerciseName)
         chipValidationStatus = findViewById(R.id.chipValidationStatus)
         tvRepCounter = findViewById(R.id.tvRepCounter)
-        tvInstantRom = findViewById(R.id.tvInstantRom)
+        tvCompletedRepMetrics = findViewById(R.id.tvCompletedRepMetrics)
         bannerInsufficientVisibility = findViewById(R.id.bannerInsufficientVisibility)
-        tvInsufficientWhy = findViewById(R.id.tvInsufficientWhy)
+        tvInsufficientMessage = findViewById(R.id.tvInsufficientMessage)
         tvLiveFeedback = findViewById(R.id.tvLiveFeedback)
         btnLiveFlipCamera = findViewById(R.id.btnLiveFlipCamera)
         btnEndSession = findViewById(R.id.btnEndSession)
-
-        // Mini Landmark Visibility Panel references
-        llMiniLandmarkPanel = findViewById(R.id.llMiniLandmarkPanel)
-        tvMiniPanelHeader = findViewById(R.id.tvMiniPanelHeader)
-
-        miniLandmarkViews.clear()
-        miniLandmarkViews.add(Pair(PoseLandmarkType.LEFT_SHOULDER, Pair("LEFT_SHOULDER", findViewById(R.id.tvMiniLmLeftShoulder))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.RIGHT_SHOULDER, Pair("RIGHT_SHOULDER", findViewById(R.id.tvMiniLmRightShoulder))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.LEFT_ELBOW, Pair("LEFT_ELBOW", findViewById(R.id.tvMiniLmLeftElbow))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.RIGHT_ELBOW, Pair("RIGHT_ELBOW", findViewById(R.id.tvMiniLmRightElbow))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.LEFT_WRIST, Pair("LEFT_WRIST", findViewById(R.id.tvMiniLmLeftWrist))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.RIGHT_WRIST, Pair("RIGHT_WRIST", findViewById(R.id.tvMiniLmRightWrist))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.LEFT_HIP, Pair("LEFT_HIP", findViewById(R.id.tvMiniLmLeftHip))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.RIGHT_HIP, Pair("RIGHT_HIP", findViewById(R.id.tvMiniLmRightHip))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.LEFT_ANKLE, Pair("LEFT_ANKLE", findViewById(R.id.tvMiniLmLeftAnkle))))
-        miniLandmarkViews.add(Pair(PoseLandmarkType.RIGHT_ANKLE, Pair("RIGHT_ANKLE", findViewById(R.id.tvMiniLmRightAnkle))))
 
         // Position Guidance references
         llPositionGuidance = findViewById(R.id.llPositionGuidance)
@@ -127,7 +120,31 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tvExerciseName.text = exerciseName
 
+        // Long press on exercise title allows QA tester to manually trigger hips_dropping form error
+        tvExerciseName.setOnLongClickListener {
+            triggerFormErrorForTesting("hips_dropping")
+            true
+        }
+
+        // Register QA test broadcast receiver
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(testReceiver, IntentFilter(ACTION_TEST_FORM_ERROR), RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(testReceiver, IntentFilter(ACTION_TEST_FORM_ERROR))
+        }
+
         // Initialize Android TextToSpeech for real-time audio guidance
+        ttsController = TtsFeedbackController(
+            speakDelegate = { text ->
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "feedback_${System.currentTimeMillis()}") ?: TextToSpeech.ERROR
+            },
+            setLanguageDelegate = { locale ->
+                tts?.setLanguage(locale) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            },
+            logInfo = { msg -> Log.i(TAG, msg) },
+            logWarn = { msg -> Log.w(TAG, msg) },
+            logError = { msg -> Log.e(TAG, msg) }
+        )
         tts = TextToSpeech(this, this)
 
         // Initialize SDK analyzer
@@ -154,6 +171,13 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             finalizeSession()
         }
 
+        // Check if simulation extra was passed
+        if (intent.getBooleanExtra(EXTRA_SIMULATE_FORM_ERROR, false)) {
+            previewView.postDelayed({
+                triggerFormErrorForTesting("hips_dropping")
+            }, 1000L)
+        }
+
         // Start live camera stream
         cameraCapturePipeline.startCamera(this, previewView)
     }
@@ -165,7 +189,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // 1. Extract 33 pose landmarks
         val poseResult = poseEstimator.detect(bitmap, timestampMs)
 
-        // 2. Evaluate proactive position guidance & landmark diagnosis
+        // 2. Evaluate proactive position guidance
         val guidanceResult = PositionGuidanceEvaluator.evaluate(
             landmarks = poseResult.landmarks,
             hasPose = poseResult.hasPose
@@ -190,57 +214,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 poseOverlayView.clear()
             }
 
-            // 1. Update Mini Landmark Visibility Panel (top-right corner, small)
-            val landmarkMap = poseResult.landmarks.associateBy { it.index }
-            val isFlashTick = (SystemClock.elapsedRealtime() / 400) % 2L == 0L
-            val anyBelow04 = guidanceResult.lowConfidenceIndices.isNotEmpty()
-
-            miniLandmarkViews.forEach { (index, info) ->
-                val vis = landmarkMap[index]?.visibility ?: 0.0f
-                val pct = (vis * 100).toInt()
-                val tv = info.second
-                tv.text = "${info.first}: $pct%"
-
-                // Color coding per specification:
-                // GREEN if >= 0.60, YELLOW if 0.40..0.59, RED if < 0.40
-                when {
-                    vis >= 0.60f -> {
-                        tv.setTextColor(Color.parseColor("#00E676")) // Bright green
-                        tv.setBackgroundColor(Color.TRANSPARENT)
-                    }
-                    vis >= 0.40f -> {
-                        tv.setTextColor(Color.parseColor("#FFD54F")) // Amber yellow
-                        tv.setBackgroundColor(Color.TRANSPARENT)
-                    }
-                    else -> {
-                        // Drops below 0.4: flash red
-                        tv.setTextColor(Color.parseColor("#FF5252"))
-                        if (isFlashTick) {
-                            tv.setBackgroundColor(Color.parseColor("#80D32F2F"))
-                        } else {
-                            tv.setBackgroundColor(Color.TRANSPARENT)
-                        }
-                    }
-                }
-            }
-
-            if (anyBelow04) {
-                if (isFlashTick) {
-                    tvMiniPanelHeader.text = "⚠️ LOW VISIBILITY"
-                    tvMiniPanelHeader.setTextColor(Color.parseColor("#FF5252"))
-                    llMiniLandmarkPanel.setBackgroundColor(Color.parseColor("#E63E0000"))
-                } else {
-                    tvMiniPanelHeader.text = "LANDMARKS"
-                    tvMiniPanelHeader.setTextColor(Color.parseColor("#FF8A80"))
-                    llMiniLandmarkPanel.setBackgroundColor(Color.parseColor("#CC0D0D0D"))
-                }
-            } else {
-                tvMiniPanelHeader.text = "LANDMARKS"
-                tvMiniPanelHeader.setTextColor(Color.parseColor("#888888"))
-                llMiniLandmarkPanel.setBackgroundColor(Color.parseColor("#CC0D0D0D"))
-            }
-
-            // 2. Update Position Guidance Messages (subtle, bottom of screen)
+            // 1. Position Guidance Messages (subtle, bottom of screen)
             tvPositionGuidance.text = guidanceResult.guidanceMessage
             if (guidanceResult.isWarning) {
                 tvPositionGuidance.setTextColor(Color.parseColor("#FFB74D"))
@@ -254,45 +228,53 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 llPositionGuidance.setBackgroundColor(Color.parseColor("#B3111111"))
             }
 
-            // 3. Update ValidationStatus indicator & INSUFFICIENT_VISIBILITY Banner with "Why:"
-            when (frameResult.status) {
-                ValidationStatus.VALID -> {
-                    chipValidationStatus.text = "TRACKING"
-                    chipValidationStatus.setBackgroundColor(Color.parseColor("#4CAF50"))
-                    bannerInsufficientVisibility.visibility = View.GONE
-                }
-                ValidationStatus.INSUFFICIENT_VISIBILITY -> {
-                    chipValidationStatus.text = "INSUFFICIENT VISIBILITY"
-                    chipValidationStatus.setBackgroundColor(Color.parseColor("#E53935"))
-                    bannerInsufficientVisibility.visibility = View.VISIBLE
-                    tvInsufficientWhy.text = guidanceResult.insufficientWhyMessage
-
-                    // Throttled audible visibility reminder
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastVisibilityWarningTimestamp > VISIBILITY_AUDIO_COOLDOWN_MS) {
-                        lastVisibilityWarningTimestamp = now
-                        speakAudioFeedback("Can't see you clearly, adjust your position.")
-                    }
-                }
-                ValidationStatus.INVALID -> {
-                    chipValidationStatus.text = "INVALID"
-                    chipValidationStatus.setBackgroundColor(Color.parseColor("#FF9800"))
-                    bannerInsufficientVisibility.visibility = View.GONE
-                }
+            // 2. Status Chip: "Tracking well" (green) or "Adjust position" (red)
+            val isTrackingWell = (frameResult.status == ValidationStatus.VALID && !guidanceResult.isWarning)
+            if (isTrackingWell) {
+                chipValidationStatus.text = "Tracking well"
+                chipValidationStatus.setBackgroundColor(Color.parseColor("#4CAF50"))
+            } else {
+                chipValidationStatus.text = "Adjust position"
+                chipValidationStatus.setBackgroundColor(Color.parseColor("#E53935"))
             }
 
-            // Update Real-time Rep Counter
+            // 3. INSUFFICIENT_VISIBILITY Banner: brief, non-alarming, single actionable line
+            if (frameResult.status == ValidationStatus.INSUFFICIENT_VISIBILITY) {
+                bannerInsufficientVisibility.visibility = View.VISIBLE
+                tvInsufficientMessage.text = guidanceResult.actionableInsufficientMessage
+
+                // Throttled audible visibility reminder
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastVisibilityWarningTimestamp > VISIBILITY_AUDIO_COOLDOWN_MS) {
+                    lastVisibilityWarningTimestamp = now
+                    speakAudioFeedback(guidanceResult.actionableInsufficientMessage)
+                }
+            } else {
+                bannerInsufficientVisibility.visibility = View.GONE
+            }
+
+            // 4. Rep Counter (large, clear) & Completed Rep Metrics (ROM / TuT / Form upon completion)
             if (frameResult.status == ValidationStatus.INSUFFICIENT_VISIBILITY) {
                 // Per R7 refusal rule: Do not force or display unreliable metrics
                 tvRepCounter.text = "--"
-                tvInstantRom.text = "ROM: Unavailable"
             } else {
-                tvRepCounter.text = (frameResult.currentReps ?: 0).toString()
-                val instantRom = frameResult.instantRomPercent
-                tvInstantRom.text = if (instantRom != null) "ROM: ${instantRom.toInt()}%" else "ROM: --"
+                val currentReps = frameResult.currentReps ?: 0
+                tvRepCounter.text = currentReps.toString()
+
+                // When a rep completes, update ROM/TuT/Form numbers (not live per-frame spam)
+                if (currentReps > lastCompletedRepCount) {
+                    lastCompletedRepCount = currentReps
+                    val latestRep = analyzer.latestCompletedRepMetrics
+                    if (latestRep != null) {
+                        val formScore = analyzer.getRepFormScore(currentReps)
+                        val tutStr = String.format(Locale.US, "%.1f", latestRep.tutFactor)
+                        tvCompletedRepMetrics.text = "Rep $currentReps: ROM ${latestRep.romPercent.toInt()}% • TuT ${tutStr}x • Form $formScore%"
+                        tvCompletedRepMetrics.visibility = View.VISIBLE
+                    }
+                }
             }
 
-            // Playback Form Rule Audio Feedback
+            // 5. Form Rule Audio & Banner Feedback
             frameResult.activeFeedback?.let { feedback ->
                 val msg = feedback.message
                 if (msg.isNotEmpty() && msg != lastSpokenFeedback) {
@@ -305,19 +287,33 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun speakAudioFeedback(text: String) {
-        if (isTtsInitialized && tts != null) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "feedback_${System.currentTimeMillis()}")
-        }
+    /**
+     * Speaks audio feedback via TextToSpeech with explicit logging and ready queuing.
+     */
+    fun speakAudioFeedback(text: String) {
+        ttsController.speak(text)
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = tts?.setLanguage(Locale.US)
-            isTtsInitialized = (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED)
-            Log.i(TAG, "TTS initialized successfully: $isTtsInitialized")
-        } else {
-            Log.w(TAG, "TTS initialization failed")
+        ttsController.onInit(status)
+    }
+
+    /**
+     * QA testing helper: manually triggers a form error condition and spoken feedback.
+     */
+    fun triggerFormErrorForTesting(errorName: String = "hips_dropping") {
+        val msg = when (errorName) {
+            "hips_dropping" -> "Keep your hips up."
+            "hips_piking" -> "Lower your hips slightly."
+            "insufficient_depth" -> "Go lower."
+            "incomplete_lockout" -> "Fully extend at the top."
+            else -> "Keep your hips up."
+        }
+        Log.i(TAG, "Manually triggering form error condition for QA: $errorName -> \"$msg\"")
+        runOnUiThread {
+            tvLiveFeedback.text = msg
+            tvLiveFeedback.visibility = View.VISIBLE
+            speakAudioFeedback(msg)
         }
     }
 
@@ -335,9 +331,15 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(testReceiver)
+        } catch (e: Exception) {
+            // Receiver might not have been registered
+        }
         tts?.stop()
         tts?.shutdown()
         poseEstimator.close()
         cameraCapturePipeline.stopCamera()
     }
 }
+
