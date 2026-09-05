@@ -209,6 +209,17 @@ internal class SquatStateMachine(
                     currentPhase = ExercisePhase.TOP
                 } else if (!reachedBottom && kneeAngle < (minKneeAngleThisRep - 5.0f)) {
                     // User re-descended after an incomplete attempt without touching top
+                    val incomplete = IncompleteRep(
+                        attemptIndex = _incompleteReps.size + 1,
+                        startTimestampMs = repStartTimestampMs,
+                        reversalTimestampMs = timestampMs,
+                        minElbowAngleAchieved = minKneeAngleThisRep,
+                        reason = "Reversed before reaching bottom target and re-descended"
+                    )
+                    _incompleteReps.add(incomplete)
+                    newlyIncomplete = incomplete
+                    repStartTimestampMs = timestampMs
+                    minKneeAngleThisRep = kneeAngle
                     currentPhase = ExercisePhase.DESCENDING
                 }
             }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -19,6 +20,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.view.PreviewView
 import com.example.cvassessment.app.camera.AndroidCameraFrame
 import com.example.cvassessment.app.camera.CameraCapturePipeline
+import com.example.cvassessment.app.ui.AudioFeedbackController
+import com.example.cvassessment.app.ui.FeedbackAudioCatalog
 import com.example.cvassessment.app.ui.PoseOverlayView
 import com.example.cvassessment.app.ui.PositionGuidanceEvaluator
 import com.example.cvassessment.app.ui.TtsFeedbackController
@@ -36,7 +39,7 @@ import java.util.Locale
  * - Simple status chip: "Tracking well" (green) or "Adjust position" (red).
  * - Completed rep metrics (ROM / TuT / Form) displayed only when a rep completes.
  * - Simplified INSUFFICIENT_VISIBILITY messaging: single actionable line matching Screen 2.
- * - Spoken audio feedback cues via Android TextToSpeech with explicit logging and ready queue.
+ * - Pre-recorded audio clip playback via Android MediaPlayer with seamless TextToSpeech fallback.
  * - "End Session" button finalizes the session and transitions to Screen 4.
  */
 class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -73,6 +76,8 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tvPositionGuidance: TextView
     private lateinit var tvPositionGuidanceIcon: TextView
 
+    private var mediaPlayer: MediaPlayer? = null
+    internal lateinit var audioFeedbackController: AudioFeedbackController
     private var tts: TextToSpeech? = null
     internal lateinit var ttsController: TtsFeedbackController
     private var lastSpokenFeedback: String? = null
@@ -133,7 +138,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             registerReceiver(testReceiver, IntentFilter(ACTION_TEST_FORM_ERROR))
         }
 
-        // Initialize Android TextToSpeech for real-time audio guidance
+        // Initialize Android TextToSpeech for fallback
         ttsController = TtsFeedbackController(
             speakDelegate = { text ->
                 tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "feedback_${System.currentTimeMillis()}") ?: TextToSpeech.ERROR
@@ -146,6 +151,19 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             logError = { msg -> Log.e(TAG, msg) }
         )
         tts = TextToSpeech(this, this)
+
+        // Initialize AudioFeedbackController with MediaPlayer and TTS fallback
+        audioFeedbackController = AudioFeedbackController(
+            playClipDelegate = { resourceName ->
+                playPreRecordedClip(resourceName)
+            },
+            ttsFallbackDelegate = { text ->
+                ttsController.speak(text)
+            },
+            logInfo = { msg -> Log.i(TAG, msg) },
+            logWarn = { msg -> Log.w(TAG, msg) },
+            logError = { msg -> Log.e(TAG, msg) }
+        )
 
         // Initialize SDK analyzer
         analyzer = ExerciseAnalyzer(exerciseId = exerciseId, exerciseName = exerciseName)
@@ -247,7 +265,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastVisibilityWarningTimestamp > VISIBILITY_AUDIO_COOLDOWN_MS) {
                     lastVisibilityWarningTimestamp = now
-                    speakAudioFeedback(guidanceResult.actionableInsufficientMessage)
+                    playAudioFeedback(FeedbackAudioCatalog.CLIP_CANT_SEE_YOU, guidanceResult.actionableInsufficientMessage)
                 }
             } else {
                 bannerInsufficientVisibility.visibility = View.GONE
@@ -281,17 +299,61 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     lastSpokenFeedback = msg
                     tvLiveFeedback.text = msg
                     tvLiveFeedback.visibility = View.VISIBLE
-                    speakAudioFeedback(msg)
+                    playAudioFeedback(feedback.relatedError, msg)
                 }
             }
         }
     }
 
     /**
+     * Plays pre-recorded audio clip via MediaPlayer if present in res/raw.
+     * Returns true if playback succeeded, false otherwise.
+     */
+    private fun playPreRecordedClip(resourceName: String): Boolean {
+        return try {
+            val resId = resources.getIdentifier(resourceName, "raw", packageName)
+            if (resId == 0) {
+                return false
+            }
+
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer.create(this, resId)?.apply {
+                setOnCompletionListener { mp ->
+                    mp.release()
+                    if (mediaPlayer === mp) {
+                        mediaPlayer = null
+                    }
+                }
+                setOnErrorListener { mp, what, extra ->
+                    Log.w(TAG, "MediaPlayer error ($what, $extra) on clip $resourceName")
+                    mp.release()
+                    if (mediaPlayer === mp) {
+                        mediaPlayer = null
+                    }
+                    true
+                }
+                start()
+            }
+            mediaPlayer != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to play pre-recorded audio clip $resourceName: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Plays audio feedback via pre-recorded clip, falling back to TextToSpeech if clip is missing.
+     */
+    fun playAudioFeedback(errorName: String?, message: String) {
+        audioFeedbackController.playFeedback(errorName, message)
+    }
+
+    /**
      * Speaks audio feedback via TextToSpeech with explicit logging and ready queuing.
+     * Maintained for backward compatibility.
      */
     fun speakAudioFeedback(text: String) {
-        ttsController.speak(text)
+        playAudioFeedback(null, text)
     }
 
     override fun onInit(status: Int) {
@@ -307,13 +369,15 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             "hips_piking" -> "Lower your hips slightly."
             "insufficient_depth" -> "Go lower."
             "incomplete_lockout" -> "Fully extend at the top."
+            "knee_valgus" -> "Push your knees out."
+            "excessive_lean" -> "Keep your chest up."
             else -> "Keep your hips up."
         }
         Log.i(TAG, "Manually triggering form error condition for QA: $errorName -> \"$msg\"")
         runOnUiThread {
             tvLiveFeedback.text = msg
             tvLiveFeedback.visibility = View.VISIBLE
-            speakAudioFeedback(msg)
+            playAudioFeedback(errorName, msg)
         }
     }
 
@@ -336,8 +400,11 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             // Receiver might not have been registered
         }
+        mediaPlayer?.release()
+        mediaPlayer = null
         tts?.stop()
         tts?.shutdown()
+        tts = null
         poseEstimator.close()
         cameraCapturePipeline.stopCamera()
     }

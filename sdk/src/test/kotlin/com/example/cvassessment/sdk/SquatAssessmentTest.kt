@@ -439,6 +439,160 @@ class SquatAssessmentTest {
         }
     }
 
+    /**
+     * Unit Test 11: Verify avgRepDurationSec and tutFactor are mathematically consistent
+     * (tutFactor * tutBaseline ≈ avgRepDurationSec, within rounding).
+     */
+    @Test
+    fun testUnit11_MathematicalConsistencyBetweenAvgDurationAndTutFactor() {
+        val analyzer = ExerciseAnalyzer("squat", "Squat")
+
+        // Initial setup at TOP lockout (> 160°)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 1000L)
+
+        // Rep 1: 3400ms duration (from t=1200L descent start to t=4600L top completion)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 150.0f, hipLineAngle = 180.0f, timestampMs = 1200L) // Descent starts
+        analyzer.analyzeSyntheticFrame(elbowAngle = 120.0f, hipLineAngle = 160.0f, timestampMs = 2000L)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 90.0f, hipLineAngle = 120.0f, timestampMs = 2800L) // Bottom
+        analyzer.analyzeSyntheticFrame(elbowAngle = 130.0f, hipLineAngle = 160.0f, timestampMs = 3600L) // Ascent
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 4600L) // Rep 1 complete: duration = 3400ms = 3.4s
+
+        // Standing at top between reps from 4600L to 6000L (pause must NOT bleed into Rep 2)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 5000L)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 6000L)
+
+        // Rep 2: 3800ms duration (from t=6200L descent start to t=10000L top completion)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 150.0f, hipLineAngle = 180.0f, timestampMs = 6200L) // Descent starts
+        analyzer.analyzeSyntheticFrame(elbowAngle = 115.0f, hipLineAngle = 150.0f, timestampMs = 7200L)
+        analyzer.analyzeSyntheticFrame(elbowAngle = 92.0f, hipLineAngle = 120.0f, timestampMs = 8200L) // Bottom
+        analyzer.analyzeSyntheticFrame(elbowAngle = 135.0f, hipLineAngle = 160.0f, timestampMs = 9200L) // Ascent
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 10000L) // Rep 2 complete: duration = 3800ms = 3.8s
+
+        val sessionResult = analyzer.getSessionResult()
+        assertEquals(ValidationStatus.VALID, sessionResult.status)
+        assertEquals(2, sessionResult.completeReps)
+
+        val avgDuration = sessionResult.avgRepDurationSec
+        val tutFactor = sessionResult.tutFactor
+        assertNotNull("avgRepDurationSec must not be null", avgDuration)
+        assertNotNull("tutFactor must not be null", tutFactor)
+
+        // Average duration = (3.4s + 3.8s) / 2 = 3.6s
+        assertEquals("Average duration must be 3.6s", 3.6f, avgDuration!!, 0.05f)
+
+        // tutFactor = 3.6s / 4.0s baseline = 0.90
+        assertEquals("TuT Factor must be 0.90", 0.90f, tutFactor!!, 0.05f)
+
+        // Mathematical consistency: tutFactor * tutBaseline ≈ avgRepDurationSec within rounding (0.1s tolerance)
+        val expectedDuration = tutFactor * analyzer.config.tutBaseline
+        assertEquals(
+            "tutFactor * tutBaseline ($expectedDuration) must equal avgRepDurationSec ($avgDuration) within rounding",
+            avgDuration,
+            expectedDuration,
+            0.1f
+        )
+    }
+
+    /**
+     * Unit Test 12: Synthetic rep with ONE sustained error condition across 10 frames ->
+     * assert formErrors list may show it, but Form Factor calculation only counts it ONCE for that rep.
+     */
+    @Test
+    fun testUnit12_SustainedErrorAcrossTenFramesCountsOnceInFormFactor() {
+        val analyzer = ExerciseAnalyzer("squat", "Squat")
+
+        // Top lockout
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = 1000L)
+
+        // Rep 1: Starts descending, and experiences continuous excessive_lean (hipAngle = 60° < 65°) across 10 consecutive frames
+        var time = 1200L
+        for (i in 1..10) {
+            val kneeAngle = 150.0f - (i * 6.0f) // Goes down to 90° (reaches bottom depth)
+            analyzer.analyzeSyntheticFrame(
+                elbowAngle = kneeAngle.coerceAtLeast(90.0f),
+                hipLineAngle = 60.0f, // Continuous excessive forward lean across all 10 frames
+                timestampMs = time
+            )
+            time += 200L
+        }
+
+        // Ascends back up with good posture
+        analyzer.analyzeSyntheticFrame(elbowAngle = 130.0f, hipLineAngle = 160.0f, timestampMs = time)
+        time += 300L
+        analyzer.analyzeSyntheticFrame(elbowAngle = 165.0f, hipLineAngle = 180.0f, timestampMs = time) // Rep complete
+
+        val sessionResult = analyzer.getSessionResult()
+        assertEquals(1, sessionResult.completeReps)
+        assertTrue("formErrors must record the detected error", sessionResult.formErrors.any { it.errorName == "excessive_lean" })
+
+        // excessive_lean severity = 0.50
+        // If counted 10 times: 1 - (10 * 0.50) = -4.0 -> clamped to 0.0
+        // Because it counts ONCE per rep: 1 - (1 * 0.50 / 1) = 0.50!
+        assertNotNull(sessionResult.formFactor)
+        assertEquals("Form Factor must count sustained error exactly once (1.0 - 0.5 = 0.50)", 0.50f, sessionResult.formFactor!!, 0.01f)
+
+        // Also explicitly verify that even if a list containing 10 detection instances is fed to computeFormFactor:
+        val tenDuplicateErrors = (1..10).map {
+            FormError(
+                errorName = "excessive_lean",
+                confidence = 0.9f,
+                repIndex = 1,
+                severity = 0.50f
+            )
+        }
+        val computedFactor = analyzer.squatOutputGate.computeFormFactor(1, tenDuplicateErrors)
+        assertEquals(
+            "computeFormFactor must deduplicate multiple frame detections to count once per rep",
+            0.50f,
+            computedFactor!!,
+            0.01f
+        )
+    }
+
+    /**
+     * Unit Test 13: Verify Form Factor for a rep with confidence=0.84, ROM=100%, and one moderate-severity error
+     * is NOT zero — recalculate what it should reasonably be and assert against that.
+     */
+    @Test
+    fun testUnit13_FormFactorForModerateSeverityErrorNotZero() {
+        val analyzer = ExerciseAnalyzer("squat", "Squat")
+
+        // 1 complete rep, 84% confidence, 100% ROM, and 1 moderate-severity error (excessive_lean, severity = 0.50)
+        // Formula: formFactor = 1 - (weighted_sum_of_active_form_error_severities / max_possible_severity)
+        // For 1 completed rep with severity 0.50:
+        // Expected Form Factor = 1.0 - (0.50 / 1) = 0.50 (50%)
+        val singleError = FormError(
+            errorName = SquatFormRules.EXCESSIVE_LEAN.errorName,
+            confidence = 0.84f,
+            repIndex = 1,
+            severity = SquatFormRules.EXCESSIVE_LEAN.severity // 0.50f
+        )
+
+        val sessionResult = analyzer.squatOutputGate.buildSessionResult(
+            status = ValidationStatus.VALID,
+            confidence = 0.84f,
+            completeReps = 1,
+            incompleteReps = 0,
+            avgRepDurationSec = 3.5f,
+            romPercent = 100.0f,
+            tutFactor = 0.88f,
+            formErrors = listOf(singleError)
+        )
+
+        assertNotNull("Form Factor must not be null", sessionResult.formFactor)
+        assertTrue("Form Factor must NOT be zero for a single moderate-severity error", sessionResult.formFactor!! > 0.0f)
+        assertEquals(
+            "Form Factor should reasonably be 0.50 (1.0 - 0.50 / 1)",
+            0.50f,
+            sessionResult.formFactor!!,
+            0.001f
+        )
+
+        // Also verify via computeFormFactor directly
+        val repScore = analyzer.squatOutputGate.computeFormFactor(1, listOf(singleError))
+        assertEquals(0.50f, repScore!!, 0.001f)
+    }
+
     private fun createSyntheticSquatLandmarks(
         leftHipX: Float, rightHipX: Float,
         leftKneeX: Float, rightKneeX: Float,

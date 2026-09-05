@@ -44,6 +44,10 @@ internal class SquatFormRuleEngine(
     var lastSkipReason: String? = null
         private set
 
+    private var isExcessiveLeanActive: Boolean = false
+    private var lastLeanRepIndex: Int? = null
+    private var hasFiredFeedbackForLean: Boolean = false
+
     /**
      * Evaluates a frame with explicit angles, landmarks, and rep metrics.
      */
@@ -63,6 +67,8 @@ internal class SquatFormRuleEngine(
     ): FormRuleOutput {
         if (!isVisibilitySufficient) {
             consecutiveFrames.clear()
+            isExcessiveLeanActive = false
+            hasFiredFeedbackForLean = false
             return FormRuleOutput(
                 activeErrors = emptyList(),
                 allSessionErrors = _allSessionErrors.toList(),
@@ -115,9 +121,20 @@ internal class SquatFormRuleEngine(
         // -------------------------------------------------------------
         // 2. Excessive Forward Lean (Optional stretch check)
         // -------------------------------------------------------------
-        if ((phase == ExercisePhase.DESCENDING || phase == ExercisePhase.BOTTOM) && hipAngle < 65.0f) {
+        val isLeanConditionMet = (phase == ExercisePhase.DESCENDING || phase == ExercisePhase.BOTTOM) && hipAngle < 65.0f
+        var isNewLeanOccurrence = false
+
+        if (isLeanConditionMet) {
             val count = (consecutiveFrames[SquatFormRules.EXCESSIVE_LEAN.errorName] ?: 0) + 1
             consecutiveFrames[SquatFormRules.EXCESSIVE_LEAN.errorName] = count
+
+            if (!isExcessiveLeanActive || (currentRepIndex != null && currentRepIndex != lastLeanRepIndex)) {
+                isExcessiveLeanActive = true
+                lastLeanRepIndex = currentRepIndex
+                hasFiredFeedbackForLean = false
+                isNewLeanOccurrence = true
+            }
+
             activeErrorsThisFrame.add(
                 FormError(
                     errorName = SquatFormRules.EXCESSIVE_LEAN.errorName,
@@ -128,6 +145,8 @@ internal class SquatFormRuleEngine(
             )
         } else {
             consecutiveFrames[SquatFormRules.EXCESSIVE_LEAN.errorName] = 0
+            isExcessiveLeanActive = false
+            hasFiredFeedbackForLean = false
         }
 
         // -------------------------------------------------------------
@@ -146,8 +165,18 @@ internal class SquatFormRuleEngine(
             }
         }
 
-        // Rule 5: Record all detected errors for session audit
-        _allSessionErrors.addAll(activeErrorsThisFrame)
+        // Rule 5: Record all detected errors for session audit.
+        // For excessive_lean, deduplicate continuous occurrences within a rep:
+        // only create a new entry when the error condition newly starts, not repeatedly while it continues.
+        for (error in activeErrorsThisFrame) {
+            if (error.errorName == SquatFormRules.EXCESSIVE_LEAN.errorName) {
+                if (isNewLeanOccurrence) {
+                    _allSessionErrors.add(error)
+                }
+            } else {
+                _allSessionErrors.add(error)
+            }
+        }
 
         // -------------------------------------------------------------
         // 4. Audio Feedback Gating Rules
@@ -168,6 +197,11 @@ internal class SquatFormRuleEngine(
                 if (frames < minPersistenceFrames) {
                     continue
                 }
+            }
+
+            // For sustained excessive_lean, trigger once per continuous occurrence, not repeatedly while it continues
+            if (error.errorName == SquatFormRules.EXCESSIVE_LEAN.errorName && hasFiredFeedbackForLean) {
+                continue
             }
 
             // Rule 3: Cooldown (4000ms per errorName)
@@ -196,6 +230,9 @@ internal class SquatFormRuleEngine(
                 relatedError = winner.first.errorName
             )
             lastFeedbackTimestamps[winner.first.errorName] = timestampMs
+            if (winner.first.errorName == SquatFormRules.EXCESSIVE_LEAN.errorName) {
+                hasFiredFeedbackForLean = true
+            }
             _allFeedbackEvents.add(event)
             newEvents.add(event)
         }
@@ -245,5 +282,8 @@ internal class SquatFormRuleEngine(
         _allSessionErrors.clear()
         _allFeedbackEvents.clear()
         lastSkipReason = null
+        isExcessiveLeanActive = false
+        lastLeanRepIndex = null
+        hasFiredFeedbackForLean = false
     }
 }

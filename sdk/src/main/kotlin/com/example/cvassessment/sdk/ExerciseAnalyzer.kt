@@ -5,6 +5,7 @@ import com.example.cvassessment.sdk.form.SquatFormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
 import com.example.cvassessment.sdk.metrics.RepMetrics
 import com.example.cvassessment.sdk.output.OutputGate
+import com.example.cvassessment.sdk.output.SquatOutputGate
 import com.example.cvassessment.sdk.pose.PoseEstimationResult
 import com.example.cvassessment.sdk.pose.PoseEstimator
 import com.example.cvassessment.sdk.pose.PoseLandmark
@@ -45,6 +46,7 @@ class ExerciseAnalyzer(
     internal val squatFormRuleEngine = SquatFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
+    internal val squatOutputGate = SquatOutputGate(config = config)
 
     // Optional PoseEstimator for Android live camera pipeline
     var poseEstimator: PoseEstimator? = null
@@ -99,13 +101,23 @@ class ExerciseAnalyzer(
             )
         }
 
-        return outputGate.assembleFrameResult(
-            visibilityStatus = visResult.status,
-            frameConfidence = metrics.confidence,
-            exerciseState = state,
-            frameMetrics = metrics,
-            formOutput = form
-        )
+        if (isSquat) {
+            return squatOutputGate.assembleFrameResult(
+                visibilityStatus = visResult.status,
+                frameConfidence = metrics.confidence,
+                exerciseState = state,
+                frameMetrics = metrics,
+                formOutput = form
+            )
+        } else {
+            return outputGate.assembleFrameResult(
+                visibilityStatus = visResult.status,
+                frameConfidence = metrics.confidence,
+                exerciseState = state,
+                frameMetrics = metrics,
+                formOutput = form
+            )
+        }
     }
 
     /**
@@ -167,13 +179,23 @@ class ExerciseAnalyzer(
             )
         }
 
-        return outputGate.assembleFrameResult(
-            visibilityStatus = visStatus,
-            frameConfidence = confidence,
-            exerciseState = state,
-            frameMetrics = metrics,
-            formOutput = form
-        )
+        if (isSquat) {
+            return squatOutputGate.assembleFrameResult(
+                visibilityStatus = visStatus,
+                frameConfidence = confidence,
+                exerciseState = state,
+                frameMetrics = metrics,
+                formOutput = form
+            )
+        } else {
+            return outputGate.assembleFrameResult(
+                visibilityStatus = visStatus,
+                frameConfidence = confidence,
+                exerciseState = state,
+                frameMetrics = metrics,
+                formOutput = form
+            )
+        }
     }
 
     /**
@@ -211,14 +233,25 @@ class ExerciseAnalyzer(
             1.0f
         }
 
-        return outputGate.assembleSessionResult(
-            visibilityStatus = visStatus,
-            sessionConfidence = sessionConfidence,
-            exerciseState = currentState,
-            allRepMetrics = metricsEngine.allRepMetrics,
-            allFormErrors = sessionErrors,
-            allFeedbackEvents = feedbackEvents
-        )
+        if (isSquat) {
+            return squatOutputGate.assembleSessionResult(
+                visibilityStatus = visStatus,
+                sessionConfidence = sessionConfidence,
+                exerciseState = currentState,
+                allRepMetrics = metricsEngine.allRepMetrics,
+                allFormErrors = sessionErrors,
+                allFeedbackEvents = feedbackEvents
+            )
+        } else {
+            return outputGate.assembleSessionResult(
+                visibilityStatus = visStatus,
+                sessionConfidence = sessionConfidence,
+                exerciseState = currentState,
+                allRepMetrics = metricsEngine.allRepMetrics,
+                allFormErrors = sessionErrors,
+                allFeedbackEvents = feedbackEvents
+            )
+        }
     }
 
     /**
@@ -238,7 +271,7 @@ class ExerciseAnalyzer(
      */
     fun getRepFormScore(repIndex: Int): Int {
         val sessionErrors = if (isSquat) squatFormRuleEngine.allSessionErrors else formRuleEngine.allSessionErrors
-        val repErrors = sessionErrors.filter { it.repIndex == repIndex }
+        val repErrors = sessionErrors.filter { it.repIndex == repIndex }.distinctBy { it.errorName }
         if (repErrors.isEmpty()) return 100
         val totalDeduction = repErrors.map { it.severity }.sum()
         val score = ((1.0f - totalDeduction).coerceIn(0.0f, 1.0f) * 100).toInt()
