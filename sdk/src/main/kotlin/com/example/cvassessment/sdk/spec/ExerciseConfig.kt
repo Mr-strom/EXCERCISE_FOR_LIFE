@@ -105,6 +105,76 @@ data class ExerciseConfig(
         )
 
         /**
+         * Canonical Squat specification from EXERCISE_SPEC.md.
+         *
+         * - category: dynamic_rep
+         * - primaryLandmarks: [hips, knees, ankles, shoulders]
+         * - trackedAngles: [knee_angle, hip_angle, back_angle]
+         * - phases: top (knee_angle > 160°) -> bottom (knee_angle < 100°, target depth, tolerance ±10°) -> top
+         * - romDefinition: knee_angle range; 100% = reaching <= 100° depth
+         * - tutBaseline: 2.0s down + 2.0s up = 4.0s/rep
+         * - cameraNotes: "side view most accurate for depth; front view good for knee valgus detection"
+         */
+        val SQUAT = ExerciseConfig(
+            exerciseId = "squat",
+            name = "Squat",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("hips", "knees", "ankles", "shoulders"),
+            trackedAngles = listOf("knee_angle", "hip_angle", "back_angle"),
+            phases = mapOf(
+                "top" to PhaseCondition(
+                    phaseName = "top",
+                    trackedAngleName = "knee_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 160.0f,
+                    toleranceDeg = 10.0f
+                ),
+                "bottom" to PhaseCondition(
+                    phaseName = "bottom",
+                    trackedAngleName = "knee_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 100.0f,
+                    toleranceDeg = 10.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "knee_angle",
+                fullExpectedAngle = 100.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 160.0f,
+                description = "knee_angle range; 100% = reaching <= 100 deg depth"
+            ),
+            tutBaseline = 4.0f,
+            cameraNotes = "side view most accurate for depth; front view good for knee valgus detection",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "knee_angle",
+                    firstJoint = PoseLandmarkType.LEFT_HIP,
+                    vertexJoint = PoseLandmarkType.LEFT_KNEE,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Knee angle (hip-knee-ankle) for flexion/depth tracking"
+                ),
+                JointAngleDefinition(
+                    angleName = "hip_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_KNEE,
+                    description = "Hip angle (shoulder-hip-knee) for hip hinge / forward lean"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_KNEE,      // 25
+                PoseLandmarkType.RIGHT_KNEE,     // 26
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE     // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

@@ -11,7 +11,8 @@ import com.example.cvassessment.sdk.UnknownExerciseException
 object ExerciseRegistry {
 
     private val configs: Map<String, ExerciseConfig> = mapOf(
-        ExerciseConfig.PUSH_UP.exerciseId to ExerciseConfig.PUSH_UP
+        ExerciseConfig.PUSH_UP.exerciseId to ExerciseConfig.PUSH_UP,
+        ExerciseConfig.SQUAT.exerciseId to ExerciseConfig.SQUAT
     )
 
     /**

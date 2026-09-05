@@ -30,5 +30,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardSquat = findViewById<View>(R.id.cardSquat)
+        cardSquat.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "squat"
+            SessionDataHolder.selectedExerciseName = "Squat"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "squat")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Squat")
+            }
+            startActivity(intent)
+        }
     }
 }
