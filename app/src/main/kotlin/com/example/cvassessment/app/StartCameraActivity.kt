@@ -19,24 +19,24 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.example.cvassessment.app.camera.AndroidCameraFrame
 import com.example.cvassessment.app.camera.CameraCapturePipeline
-import com.example.cvassessment.app.ui.FramingGuideOverlayView
-import com.example.cvassessment.app.ui.PoseOverlayView
+import com.example.cvassessment.app.ui.SetupAnalysisEvaluator
+import com.example.cvassessment.app.ui.StickmanIndicatorView
 import com.example.cvassessment.sdk.pose.PoseEstimator
-import com.example.cvassessment.sdk.pose.PoseLandmark
 import com.example.cvassessment.sdk.pose.PoseLandmarkType
 import com.example.cvassessment.sdk.spec.ExerciseRegistry
 import kotlin.math.ceil
 
 /**
- * Screen 2 — Start Camera with Interactive Framing Guide (per ANDROID_FLOW.md).
+ * Screen 2 — Start Camera with Guided Setup Analysis (Redesigned).
  *
- * Teaches user where and how to position themselves BEFORE starting the exercise:
- * 1. Framing Box Overlay: Center target zone labeled "Keep full body here".
- * 2. Real-Time Landmark Indicators: Required joints list (shoulders, elbows, wrists, hips, ankles)
- *    color-coded (>=0.60 green, 0.40..0.59 yellow, <0.40 red) updating every frame.
- * 3. Guided Instructions: Non-invasive step banner at top progressing from Step 1 to Step 4.
- * 4. Start Button Logic: Only enabled when ALL required landmarks are >= 0.60 for 2+ seconds sustained,
- *    showing live countdown timer "Ready in: 2 seconds..." and changing text to "START EXERCISE (Ready!)".
+ * User-friendly, non-intrusive setup flow:
+ * 1. Default Camera: Front-facing camera default (with toggle to Rear).
+ * 2. Visual Stickman Indicator: Intuitive body silhouette color-coded per tracking quality (no raw percentages).
+ * 3. 7-Second Analysis Phase: Evaluates setup quality and averages confidences over 7 seconds.
+ * 4. Single Actionable Message: Shows exactly ONE human-readable diagnosis (e.g. "Great! We can see you clearly"
+ *    or "Move back — we can't see your full body").
+ * 5. Reliable Start Exercise: Button ALWAYS enables after the 7s analysis ("Start Exercise" if good,
+ *    or "Start Anyway" with a "Re-check" option if quality is borderline).
  */
 class StartCameraActivity : AppCompatActivity() {
 
@@ -45,22 +45,27 @@ class StartCameraActivity : AppCompatActivity() {
         const val EXTRA_EXERCISE_NAME = "EXTRA_EXERCISE_NAME"
         private const val TAG = "StartCameraActivity"
         private const val MODEL_ASSET = "pose_landmarker_full.task"
-        private const val REQUIRED_SUSTAINED_DURATION_MS = 2000L
-        private const val VISIBILITY_THRESHOLD = 0.60f
+        const val ANALYSIS_DURATION_MS = 7000L
     }
 
     private lateinit var cameraCapturePipeline: CameraCapturePipeline
     private lateinit var poseEstimator: PoseEstimator
+    private val setupAnalysisEvaluator = SetupAnalysisEvaluator()
 
     private lateinit var previewView: PreviewView
-    private lateinit var framingGuideOverlay: FramingGuideOverlayView
-    private lateinit var poseOverlayView: PoseOverlayView
+    private lateinit var stickmanView: StickmanIndicatorView
 
     private lateinit var tvExerciseTitle: TextView
     private lateinit var tvFramingGuidance: TextView
-    private lateinit var tvGuidedStep: TextView
-    private lateinit var tvCountdownTimer: TextView
     private lateinit var btnSwitchCamera: Button
+
+    private lateinit var llAnalyzingProgress: LinearLayout
+    private lateinit var tvAnalyzingCountdown: TextView
+    private lateinit var tvResultIcon: TextView
+    private lateinit var tvStatusHeadline: TextView
+    private lateinit var tvStatusTip: TextView
+
+    private lateinit var btnReanalyze: Button
     private lateinit var btnStartExercise: Button
 
     private lateinit var panelCameraError: LinearLayout
@@ -68,14 +73,13 @@ class StartCameraActivity : AppCompatActivity() {
     private lateinit var btnRetryCamera: Button
     private lateinit var btnOpenSettings: Button
 
-    // Landmark list TextView references
-    private lateinit var landmarkViews: Map<Int, Pair<String, TextView>>
-
     private var exerciseId: String = "push_up"
     private var exerciseName: String = "Push-Up"
 
-    // Timing state for the 2+ seconds sustained stability requirement
-    private var sustainedStartTimeMs: Long = 0L
+    // 7-second setup analysis timing and state
+    private var analysisStartTimeMs: Long = 0L
+    private var isAnalysisComplete: Boolean = false
+    private var lastEvaluationResult: SetupAnalysisEvaluator.SetupEvaluationResult? = null
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -102,14 +106,19 @@ class StartCameraActivity : AppCompatActivity() {
 
         // Initialize UI view references
         previewView = findViewById(R.id.startCameraPreview)
-        framingGuideOverlay = findViewById(R.id.framingGuideOverlay)
-        poseOverlayView = findViewById(R.id.startPoseOverlay)
+        stickmanView = findViewById(R.id.stickmanView)
 
         tvExerciseTitle = findViewById(R.id.tvStartExerciseTitle)
         tvFramingGuidance = findViewById(R.id.tvFramingGuidance)
-        tvGuidedStep = findViewById(R.id.tvGuidedStep)
-        tvCountdownTimer = findViewById(R.id.tvCountdownTimer)
         btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
+
+        llAnalyzingProgress = findViewById(R.id.llAnalyzingProgress)
+        tvAnalyzingCountdown = findViewById(R.id.tvAnalyzingCountdown)
+        tvResultIcon = findViewById(R.id.tvResultIcon)
+        tvStatusHeadline = findViewById(R.id.tvStatusHeadline)
+        tvStatusTip = findViewById(R.id.tvStatusTip)
+
+        btnReanalyze = findViewById(R.id.btnReanalyze)
         btnStartExercise = findViewById(R.id.btnStartExercise)
 
         panelCameraError = findViewById(R.id.panelCameraError)
@@ -119,20 +128,6 @@ class StartCameraActivity : AppCompatActivity() {
 
         tvExerciseTitle.text = exerciseName
 
-        // Required landmarks for Push-Up: shoulders, elbows, wrists, hips, ankles (10 joints)
-        landmarkViews = mapOf(
-            PoseLandmarkType.LEFT_SHOULDER to Pair("LEFT_SHOULDER", findViewById(R.id.tvLmLeftShoulder)),
-            PoseLandmarkType.RIGHT_SHOULDER to Pair("RIGHT_SHOULDER", findViewById(R.id.tvLmRightShoulder)),
-            PoseLandmarkType.LEFT_ELBOW to Pair("LEFT_ELBOW", findViewById(R.id.tvLmLeftElbow)),
-            PoseLandmarkType.RIGHT_ELBOW to Pair("RIGHT_ELBOW", findViewById(R.id.tvLmRightElbow)),
-            PoseLandmarkType.LEFT_WRIST to Pair("LEFT_WRIST", findViewById(R.id.tvLmLeftWrist)),
-            PoseLandmarkType.RIGHT_WRIST to Pair("RIGHT_WRIST", findViewById(R.id.tvLmRightWrist)),
-            PoseLandmarkType.LEFT_HIP to Pair("LEFT_HIP", findViewById(R.id.tvLmLeftHip)),
-            PoseLandmarkType.RIGHT_HIP to Pair("RIGHT_HIP", findViewById(R.id.tvLmRightHip)),
-            PoseLandmarkType.LEFT_ANKLE to Pair("LEFT_ANKLE", findViewById(R.id.tvLmLeftAnkle)),
-            PoseLandmarkType.RIGHT_ANKLE to Pair("RIGHT_ANKLE", findViewById(R.id.tvLmRightAnkle))
-        )
-
         // Load camera guidance notes from config registry
         try {
             val config = ExerciseRegistry.getConfig(exerciseId)
@@ -141,19 +136,26 @@ class StartCameraActivity : AppCompatActivity() {
             tvFramingGuidance.text = "Side view most accurate for elbow angle. Ensure whole body is visible."
         }
 
-        // Initialize PoseEstimator for framing guide pre-check
+        // Initialize PoseEstimator
         poseEstimator = PoseEstimator(this, MODEL_ASSET)
 
-        // Initialize CameraCapturePipeline
+        // Initialize CameraCapturePipeline with FRONT camera as default (requirement 1)
         cameraCapturePipeline = CameraCapturePipeline(this)
+        cameraCapturePipeline.currentLensFacing = CameraSelector.LENS_FACING_FRONT
+        updateSwitchButtonText()
+
         cameraCapturePipeline.setFrameCallback { frame, timestampMs ->
-            processFrameForFramingGuide(frame, timestampMs)
+            processFrameForSetupAnalysis(frame, timestampMs)
         }
 
         btnSwitchCamera.setOnClickListener {
-            poseOverlayView.clear()
             cameraCapturePipeline.toggleCamera(this, previewView)
             updateSwitchButtonText()
+            restartAnalysis()
+        }
+
+        btnReanalyze.setOnClickListener {
+            restartAnalysis()
         }
 
         btnStartExercise.setOnClickListener {
@@ -181,7 +183,25 @@ class StartCameraActivity : AppCompatActivity() {
         checkAndRequestCameraPermission()
     }
 
-    private fun processFrameForFramingGuide(frame: com.example.cvassessment.sdk.CameraFrame, timestampMs: Long) {
+    private fun restartAnalysis() {
+        analysisStartTimeMs = 0L
+        isAnalysisComplete = false
+        lastEvaluationResult = null
+        setupAnalysisEvaluator.reset()
+        stickmanView.startBreathingAnimation()
+
+        runOnUiThread {
+            llAnalyzingProgress.visibility = View.VISIBLE
+            tvResultIcon.visibility = View.GONE
+            btnReanalyze.visibility = View.GONE
+            btnStartExercise.isEnabled = false
+            btnStartExercise.text = "Analyzing (7s)..."
+            tvStatusHeadline.text = "Stand still, we're analyzing your setup..."
+            tvStatusTip.text = "Keep your full body visible in the frame"
+        }
+    }
+
+    private fun processFrameForSetupAnalysis(frame: com.example.cvassessment.sdk.CameraFrame, timestampMs: Long) {
         val androidFrame = frame as? AndroidCameraFrame ?: return
         val bitmap = androidFrame.bitmap ?: return
 
@@ -191,124 +211,103 @@ class StartCameraActivity : AppCompatActivity() {
         val detectedLandmarks = poseResult.landmarks
         val landmarkMap = detectedLandmarks.associateBy { it.index }
 
-        val isFront = (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT)
+        // Compute real-time limb scores for stickman visual feedback during analysis
+        val leftArmScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.LEFT_SHOULDER]?.visibility,
+            landmarkMap[PoseLandmarkType.LEFT_ELBOW]?.visibility,
+            landmarkMap[PoseLandmarkType.LEFT_WRIST]?.visibility
+        ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
-        // 2. Evaluate visibility for all 10 required landmarks
-        var allAboveThreshold = hasPose
-        val landmarkStats = mutableListOf<Pair<String, Float>>()
+        val rightArmScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_ELBOW]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_WRIST]?.visibility
+        ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
-        landmarkViews.forEach { (index, info) ->
-            val lm = landmarkMap[index]
-            val vis = lm?.visibility ?: 0.0f
-            landmarkStats.add(Pair(info.first, vis))
-            if (vis < VISIBILITY_THRESHOLD) {
-                allAboveThreshold = false
-            }
+        val torsoScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.LEFT_SHOULDER]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]?.visibility,
+            landmarkMap[PoseLandmarkType.LEFT_HIP]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_HIP]?.visibility
+        ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
+
+        val leftLegScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.LEFT_HIP]?.visibility,
+            landmarkMap[PoseLandmarkType.LEFT_ANKLE]?.visibility
+        ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
+
+        val rightLegScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.RIGHT_HIP]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_ANKLE]?.visibility
+        ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
+
+        // 2. Manage 7-second setup analysis window
+        if (analysisStartTimeMs == 0L) {
+            analysisStartTimeMs = timestampMs
         }
 
-        // 3. Determine Guided Step (Step 1 to Step 4)
-        val visibleRequiredCount = landmarkStats.count { it.second >= 0.40f }
-        val avgTorsoX = listOfNotNull(
-            landmarkMap[PoseLandmarkType.LEFT_SHOULDER]?.x,
-            landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]?.x,
-            landmarkMap[PoseLandmarkType.LEFT_HIP]?.x,
-            landmarkMap[PoseLandmarkType.RIGHT_HIP]?.x
-        ).average()
+        val elapsedMs = timestampMs - analysisStartTimeMs
 
-        val isCentered = if (avgTorsoX.isNaN()) false else (avgTorsoX in 0.35..0.65)
+        if (!isAnalysisComplete) {
+            // Accumulate samples continuously during the 7 seconds
+            setupAnalysisEvaluator.recordSample(detectedLandmarks, hasPose)
 
-        // 4. Manage 2-second stability countdown
-        val isStableReady: Boolean
-        val countdownMessage: String
-        val currentStepText: String
+            if (elapsedMs < ANALYSIS_DURATION_MS) {
+                val remainingSec = ceil((ANALYSIS_DURATION_MS - elapsedMs) / 1000.0).toInt().coerceAtLeast(1)
 
-        if (!hasPose || visibleRequiredCount < 6) {
-            // User is either absent or too close / partially framed
-            sustainedStartTimeMs = 0L
-            isStableReady = false
-            currentStepText = "Step 1: Stand back — we need to see your full body"
-            countdownMessage = "Position full body inside the box..."
-        } else if (!isCentered) {
-            // User is detected but off to the side
-            sustainedStartTimeMs = 0L
-            isStableReady = false
-            currentStepText = "Step 2: Move to center of frame"
-            countdownMessage = "Move to center of frame..."
-        } else if (!allAboveThreshold) {
-            // User is centered, but joints are occluded or below 0.60
-            sustainedStartTimeMs = 0L
-            isStableReady = false
-            currentStepText = "Step 3: Stand still — checking pose quality"
-            countdownMessage = "Ensure arms and legs are not blocked..."
-        } else {
-            // All 10 required landmarks are >= 0.60 and user is centered
-            if (sustainedStartTimeMs == 0L) {
-                sustainedStartTimeMs = timestampMs
-            }
-            val elapsedMs = timestampMs - sustainedStartTimeMs
-
-            if (elapsedMs < REQUIRED_SUSTAINED_DURATION_MS) {
-                val remainingSec = ceil((REQUIRED_SUSTAINED_DURATION_MS - elapsedMs) / 1000.0).toInt()
-                isStableReady = false
-                currentStepText = "Step 3: Stand still — checking pose quality"
-                countdownMessage = "Ready in: $remainingSec seconds..."
-            } else {
-                isStableReady = true
-                currentStepText = "Step 4: Perfect! Tap START EXERCISE"
-                countdownMessage = "✓ Ready to begin!"
-            }
-        }
-
-        // 5. Update UI on Main Thread
-        runOnUiThread {
-            // Draw skeleton overlay
-            if (hasPose) {
-                poseOverlayView.updatePose(
-                    detectedLandmarks = detectedLandmarks,
-                    frameWidth = frame.width,
-                    frameHeight = frame.height,
-                    isFront = isFront
-                )
-            } else {
-                poseOverlayView.clear()
-            }
-
-            // Update Step 1 Framing box satisfied status (turns green when stable)
-            framingGuideOverlay.setTargetSatisfied(isStableReady)
-
-            // Update Step 3 Guided Instructions text
-            tvGuidedStep.text = currentStepText
-
-            // Update Step 2 Landmark Indicators list (Name + Confidence % + Color)
-            landmarkViews.forEach { (index, info) ->
-                val vis = landmarkMap[index]?.visibility ?: 0.0f
-                val pct = (vis * 100).toInt()
-                val tv = info.second
-
-                tv.text = "${info.first}: $pct%"
-
-                // Color coding per specification:
-                // GREEN if >= 0.60, YELLOW if 0.40..0.59, RED if < 0.40
-                when {
-                    vis >= 0.60f -> tv.setTextColor(Color.parseColor("#00E676")) // Bright green
-                    vis >= 0.40f -> tv.setTextColor(Color.parseColor("#FFD54F")) // Amber yellow
-                    else -> tv.setTextColor(Color.parseColor("#FF5252"))         // Red
+                runOnUiThread {
+                    stickmanView.updateTrackingQuality(
+                        hasPose = hasPose,
+                        leftArmScore = leftArmScore,
+                        rightArmScore = rightArmScore,
+                        torsoScore = torsoScore,
+                        leftLegScore = leftLegScore,
+                        rightLegScore = rightLegScore
+                    )
+                    tvAnalyzingCountdown.text = "Analyzing setup... ${remainingSec}s"
+                    btnStartExercise.text = "Analyzing (${remainingSec}s)..."
+                    btnStartExercise.isEnabled = false
                 }
-            }
-
-            // Update Step 4 Button & Countdown indicator
-            tvCountdownTimer.text = countdownMessage
-
-            if (isStableReady) {
-                tvCountdownTimer.setTextColor(Color.parseColor("#00E676"))
-                btnStartExercise.isEnabled = true
-                btnStartExercise.text = "START EXERCISE (Ready!)"
-                btnStartExercise.setTextColor(Color.parseColor("#00E676"))
             } else {
-                tvCountdownTimer.setTextColor(Color.parseColor("#FFB74D"))
-                btnStartExercise.isEnabled = false
-                btnStartExercise.text = "Start Exercise"
-                btnStartExercise.setTextColor(Color.parseColor("#AAAAAA"))
+                // 7-second analysis window completed: compute final verdict
+                isAnalysisComplete = true
+                val result = setupAnalysisEvaluator.evaluate()
+                lastEvaluationResult = result
+
+                runOnUiThread {
+                    stickmanView.stopBreathingAnimation()
+                    stickmanView.updateTrackingQuality(
+                        hasPose = hasPose,
+                        leftArmScore = result.leftArmScore,
+                        rightArmScore = result.rightArmScore,
+                        torsoScore = result.torsoScore,
+                        leftLegScore = result.leftLegScore,
+                        rightLegScore = result.rightLegScore
+                    )
+
+                    llAnalyzingProgress.visibility = View.GONE
+                    tvResultIcon.visibility = View.VISIBLE
+                    tvStatusHeadline.text = result.headline
+                    tvStatusTip.text = result.actionableTip
+
+                    if (result.isGood) {
+                        tvResultIcon.text = "✓"
+                        tvResultIcon.setTextColor(Color.parseColor("#00E676"))
+                        btnStartExercise.isEnabled = true
+                        btnStartExercise.text = "START EXERCISE"
+                        btnStartExercise.setBackgroundColor(Color.parseColor("#00E676"))
+                        btnStartExercise.setTextColor(Color.parseColor("#000000"))
+                        btnReanalyze.visibility = View.GONE
+                    } else {
+                        tvResultIcon.text = "⚠️"
+                        tvResultIcon.setTextColor(Color.parseColor("#FFA726"))
+                        btnStartExercise.isEnabled = true // Always interactable after analysis!
+                        btnStartExercise.text = "Start Anyway"
+                        btnStartExercise.setBackgroundColor(Color.parseColor("#EF6C00"))
+                        btnStartExercise.setTextColor(Color.parseColor("#FFFFFF"))
+                        btnReanalyze.visibility = View.VISIBLE
+                    }
+                }
             }
         }
     }
@@ -330,10 +329,10 @@ class StartCameraActivity : AppCompatActivity() {
 
     private fun startCameraPreview() {
         try {
-            tvGuidedStep.text = "Step 1: Stand back — we need to see your full body"
             cameraCapturePipeline.startCamera(this, previewView) {
                 updateSwitchButtonText()
             }
+            restartAnalysis()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start camera", e)
             showCameraError("Camera unavailable or currently in use by another app.", showSettingsButton = false)
@@ -346,7 +345,8 @@ class StartCameraActivity : AppCompatActivity() {
             tvErrorMessage.text = message
             btnOpenSettings.visibility = if (showSettingsButton) View.VISIBLE else View.GONE
             btnStartExercise.isEnabled = false
-            tvGuidedStep.text = "Camera Unavailable"
+            tvStatusHeadline.text = "Camera Unavailable"
+            tvStatusTip.text = "Grant camera permission or retry to continue"
         }
     }
 
@@ -355,10 +355,10 @@ class StartCameraActivity : AppCompatActivity() {
     }
 
     private fun updateSwitchButtonText() {
-        val nextLens = if (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_BACK) {
-            "Front"
-        } else {
+        val nextLens = if (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
             "Rear"
+        } else {
+            "Front"
         }
         btnSwitchCamera.text = "Switch to $nextLens"
     }

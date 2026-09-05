@@ -290,4 +290,128 @@ class AppFlowTest {
         assertEquals("Why: Left ankle moved out of frame", result.insufficientWhyMessage)
         assertTrue(result.lowConfidenceIndices.contains(27))
     }
+
+    @Test
+    fun testSetupAnalysisEvaluatorOptimalSetup() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        val sampleLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.88f),
+            createLandmark(12, 0.55f, 0.30f, 0.88f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            createLandmark(27, 0.47f, 0.80f, 0.85f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+
+        // Simulate 7 seconds of frames (~200 frames)
+        for (i in 1..200) {
+            evaluator.recordSample(sampleLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        assertTrue("Setup should be good", result.isGood)
+        assertEquals("Great! We can see you clearly.", result.headline)
+        assertTrue("Start button must always be enabled after analysis", result.canStartAnyway)
+        assertTrue("Overall confidence should be >= 0.50", result.overallConfidence >= 0.50f)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorMoveBackWhenFeetCutOff() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        val cutOffLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.88f),
+            createLandmark(12, 0.55f, 0.30f, 0.88f),
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.85f),
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.80f),
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            // Ankles at y = 0.95 (> 0.90 frame boundary)
+            createLandmark(27, 0.47f, 0.95f, 0.85f),
+            createLandmark(28, 0.53f, 0.95f, 0.85f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(cutOffLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Setup is not good when feet cut off", result.isGood)
+        assertEquals("Move back — we can't see your full body", result.headline)
+        assertTrue("Button must still allow Start Anyway option", result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorRightArmLowVisibility() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        val rightArmLowLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.88f),
+            createLandmark(12, 0.55f, 0.30f, 0.30f), // Right shoulder low
+            createLandmark(13, 0.40f, 0.40f, 0.85f),
+            createLandmark(14, 0.60f, 0.40f, 0.25f), // Right elbow low
+            createLandmark(15, 0.38f, 0.50f, 0.80f),
+            createLandmark(16, 0.62f, 0.50f, 0.20f), // Right wrist low
+            createLandmark(23, 0.46f, 0.55f, 0.90f),
+            createLandmark(24, 0.54f, 0.55f, 0.90f),
+            createLandmark(27, 0.47f, 0.80f, 0.85f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(rightArmLowLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Setup should flag limb issue", result.isGood)
+        assertEquals("We can't see your right arm — try adjusting your angle", result.headline)
+        assertTrue(result.rightArmScore < 0.40f)
+        assertTrue("Button must still allow Start Anyway option", result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorMoveToBetterLighting() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        // All landmarks uniformly low visibility ~0.35f
+        val darkLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.35f),
+            createLandmark(12, 0.55f, 0.30f, 0.35f),
+            createLandmark(13, 0.40f, 0.40f, 0.34f),
+            createLandmark(14, 0.60f, 0.40f, 0.34f),
+            createLandmark(15, 0.38f, 0.50f, 0.32f),
+            createLandmark(16, 0.62f, 0.50f, 0.32f),
+            createLandmark(23, 0.46f, 0.55f, 0.36f),
+            createLandmark(24, 0.54f, 0.55f, 0.36f),
+            createLandmark(27, 0.47f, 0.80f, 0.33f),
+            createLandmark(28, 0.53f, 0.80f, 0.33f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(darkLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Setup should flag lighting", result.isGood)
+        assertEquals("Move to better lighting", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorNoPersonDetected() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+
+        // 200 empty frames
+        for (i in 1..200) {
+            evaluator.recordSample(emptyList(), hasPose = false)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Setup should fail with no person", result.isGood)
+        assertEquals("Step into frame — no person detected", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
 }
