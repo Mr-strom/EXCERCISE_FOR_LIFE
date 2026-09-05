@@ -45,11 +45,11 @@ class VisibilityGateTest {
 
     /**
      * Unit test 1: Feed synthetic landmarks where all required ones are present
-     * with visibility >= 0.5 -> assert SUFFICIENT_VISIBILITY.
+     * with visibility >= 0.4 -> assert SUFFICIENT_VISIBILITY.
      */
     @Test
     fun test1_AllRequiredLandmarksPresentWithHighVisibility_ReturnsSufficient() {
-        val pose = createSyntheticPose() // Default visibility is 0.9 >= 0.5
+        val pose = createSyntheticPose() // Default visibility is 0.9 >= 0.4
         val result = visibilityGate.checkFrame(pose)
 
         assertEquals(VisibilityStatus.SUFFICIENT_VISIBILITY, result.status)
@@ -60,17 +60,17 @@ class VisibilityGateTest {
 
     /**
      * Unit test 2: Feed synthetic landmarks where a required landmark drops to
-     * visibility < 0.5 for 1 frame only -> assert still SUFFICIENT (no false positive).
+     * visibility < 0.4 for 1 frame only -> assert still SUFFICIENT (no false positive).
      */
     @Test
     fun test2_SingleFrameLowVisibilityDrop_ReturnsSufficientDueToGracePeriod() {
-        // Frame 1: Left elbow drops to 0.3 (< 0.5)
+        // Frame 1: Left elbow drops to 0.3 (< 0.4)
         val lowVisPose = createSyntheticPose(
             overrideVisibility = mapOf(PoseLandmarkType.LEFT_ELBOW to 0.3f)
         )
         val result = visibilityGate.checkFrame(lowVisPose)
 
-        // Must still be SUFFICIENT_VISIBILITY because 1 missing frame <= MAX_MISSING_FRAMES (5)
+        // Must still be SUFFICIENT_VISIBILITY because 1 missing frame <= MAX_MISSING_FRAMES (7)
         assertEquals(VisibilityStatus.SUFFICIENT_VISIBILITY, result.status)
         assertTrue(result.isSufficient)
         assertTrue(result.failureReasons.isEmpty())
@@ -86,17 +86,17 @@ class VisibilityGateTest {
     }
 
     /**
-     * Unit test 3: Feed synthetic landmarks where a required landmark stays < 0.5
-     * for 6+ consecutive frames -> assert INSUFFICIENT_VISIBILITY with reason LOW_CONFIDENCE.
+     * Unit test 3: Feed synthetic landmarks where a required landmark stays < 0.4
+     * for 8+ consecutive frames -> assert INSUFFICIENT_VISIBILITY with reason LOW_CONFIDENCE.
      */
     @Test
-    fun test3_SixConsecutiveFramesLowVisibility_ReturnsInsufficientWithLowConfidence() {
+    fun test3_EightConsecutiveFramesLowVisibility_ReturnsInsufficientWithLowConfidence() {
         val lowVisPose = createSyntheticPose(
             overrideVisibility = mapOf(PoseLandmarkType.RIGHT_WRIST to 0.2f)
         )
 
-        // Frames 1..5: within MAX_MISSING_FRAMES tolerance (still SUFFICIENT)
-        for (f in 1..5) {
+        // Frames 1..7: within MAX_MISSING_FRAMES tolerance (7) (still SUFFICIENT)
+        for (f in 1..7) {
             val intermediateResult = visibilityGate.checkFrame(lowVisPose)
             assertEquals(
                 "Frame $f should be within grace period",
@@ -105,15 +105,15 @@ class VisibilityGateTest {
             )
         }
 
-        // Frame 6: exceeds MAX_MISSING_FRAMES (5) -> must trigger INSUFFICIENT_VISIBILITY
-        val frame6Result = visibilityGate.checkFrame(lowVisPose)
-        assertEquals(VisibilityStatus.INSUFFICIENT_VISIBILITY, frame6Result.status)
-        assertFalse(frame6Result.isSufficient)
+        // Frame 8: exceeds MAX_MISSING_FRAMES (7) -> must trigger INSUFFICIENT_VISIBILITY
+        val frame8Result = visibilityGate.checkFrame(lowVisPose)
+        assertEquals(VisibilityStatus.INSUFFICIENT_VISIBILITY, frame8Result.status)
+        assertFalse(frame8Result.isSufficient)
         assertTrue(
             "Failure reasons should contain LOW_CONFIDENCE",
-            frame6Result.failureReasons.contains(VisibilityFailureReason.LOW_CONFIDENCE)
+            frame8Result.failureReasons.contains(VisibilityFailureReason.LOW_CONFIDENCE)
         )
-        assertEquals(6, frame6Result.consecutiveMissingCounts[PoseLandmarkType.RIGHT_WRIST])
+        assertEquals(8, frame8Result.consecutiveMissingCounts[PoseLandmarkType.RIGHT_WRIST])
     }
 
     /**

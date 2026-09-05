@@ -13,8 +13,8 @@ import com.example.cvassessment.sdk.pose.PoseLandmarkType
  */
 internal class VisibilityGate(
     val exerciseId: String = "push_up",
-    val landmarkVisibilityThreshold: Float = 0.5f,
-    val maxMissingFrames: Int = 5,
+    val landmarkVisibilityThreshold: Float = 0.4f,
+    val maxMissingFrames: Int = 7,
     val sessionFailureThreshold: Float = 0.50f,
     val minRequiredLandmarksPresent: Float = 0.60f,
     val boundaryMargin: Float = 0.02f
