@@ -15,7 +15,8 @@ enum class ValidationStatus {
 data class FormError(
     val errorName: String,
     val confidence: Float,
-    val repIndex: Int?
+    val repIndex: Int?,
+    val severity: Float = 0.5f
 )
 
 /**
