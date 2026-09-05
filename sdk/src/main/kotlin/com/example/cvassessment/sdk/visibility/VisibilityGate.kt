@@ -11,7 +11,7 @@ import com.example.cvassessment.sdk.pose.PoseLandmarkType
  * CRITICAL RULE: Downstream modules (State Machine, Metrics, Form Rules) must REFUSE
  * to compute or emit any metrics whenever this gate outputs INSUFFICIENT_VISIBILITY.
  */
-class VisibilityGate(
+internal class VisibilityGate(
     val exerciseId: String = "push_up",
     val landmarkVisibilityThreshold: Float = 0.5f,
     val maxMissingFrames: Int = 5,

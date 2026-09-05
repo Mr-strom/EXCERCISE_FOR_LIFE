@@ -12,10 +12,17 @@ import com.example.cvassessment.sdk.spec.ExerciseConfig
  *
  * Config-driven per ARCHITECTURE.md (R11.2).
  */
-class ExerciseStateMachine(
+internal class ExerciseStateMachine(
     val config: ExerciseConfig = ExerciseConfig.PUSH_UP
 ) {
     var currentPhase: ExercisePhase = ExercisePhase.TOP
+        private set
+
+    var currentState: ExerciseState = ExerciseState(
+        phase = ExercisePhase.TOP,
+        currentElbowAngle = 180.0f,
+        currentHipLineAngle = 180.0f
+    )
         private set
 
     private val _completeReps = mutableListOf<RepBoundary>()
@@ -152,6 +159,22 @@ class ExerciseStateMachine(
                 // Transition to ascending when arm extension begins
                 if (elbowAngle > (minElbowAngleThisRep + 5.0f) || elbowAngle > (bottomThreshold + bottomTolerance)) {
                     currentPhase = ExercisePhase.ASCENDING
+                    if (elbowAngle >= (topThreshold - 5.0f)) {
+                        val rep = RepBoundary(
+                            repIndex = _completeReps.size + 1,
+                            startTimestampMs = repStartTimestampMs,
+                            bottomTimestampMs = bottomTimestampMs,
+                            endTimestampMs = timestampMs,
+                            durationMs = timestampMs - repStartTimestampMs,
+                            minElbowAngle = minElbowAngleThisRep,
+                            isComplete = true
+                        )
+                        _completeReps.add(rep)
+                        newlyCompleted = rep
+                        isRepInProgress = false
+                        reachedBottom = false
+                        currentPhase = ExercisePhase.TOP
+                    }
                 }
             }
 
@@ -194,7 +217,7 @@ class ExerciseStateMachine(
             }
         }
 
-        return ExerciseState(
+        val state = ExerciseState(
             phase = currentPhase,
             currentElbowAngle = elbowAngle,
             currentHipLineAngle = hipLineAngle,
@@ -205,6 +228,8 @@ class ExerciseStateMachine(
             isRepInProgress = isRepInProgress,
             currentRepMinAngle = if (isRepInProgress) minElbowAngleThisRep else null
         )
+        currentState = state
+        return state
     }
 
     /**
@@ -212,6 +237,11 @@ class ExerciseStateMachine(
      */
     fun reset() {
         currentPhase = ExercisePhase.TOP
+        currentState = ExerciseState(
+            phase = ExercisePhase.TOP,
+            currentElbowAngle = 180.0f,
+            currentHipLineAngle = 180.0f
+        )
         _completeReps.clear()
         _incompleteReps.clear()
         isRepInProgress = false

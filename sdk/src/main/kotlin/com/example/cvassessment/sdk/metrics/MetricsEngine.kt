@@ -17,11 +17,15 @@ import com.example.cvassessment.sdk.statemachine.RepBoundary
  * CRITICAL RULE (R7): When visibility is insufficient, metrics are NEVER forced to a number;
  * they must be strictly null.
  */
-class MetricsEngine(
+internal class MetricsEngine(
     val config: ExerciseConfig = ExerciseConfig.PUSH_UP
 ) {
     private val repMetricsHistory = mutableListOf<RepMetrics>()
-    private var latestRepMetrics: RepMetrics? = null
+    var latestRepMetrics: RepMetrics? = null
+        private set
+
+    val allRepMetrics: List<RepMetrics> get() = repMetricsHistory.toList()
+    val latestCompletedRepMetrics: RepMetrics? get() = latestRepMetrics
 
     // Accumulator for the currently active rep attempt
     private val activeRepAngles = mutableListOf<Float>()

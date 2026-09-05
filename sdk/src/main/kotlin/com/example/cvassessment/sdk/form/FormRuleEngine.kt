@@ -21,7 +21,7 @@ import com.example.cvassessment.sdk.statemachine.ExerciseState
  * 3. Cooldown: 4000ms cooldown per errorName
  * 4. One feedback message at a time: highest-severity candidate selected; all errors logged
  */
-class FormRuleEngine(
+internal class FormRuleEngine(
     val exerciseId: String = "push_up",
     val confidenceThreshold: Float = 0.6f,
     val minPersistenceFrames: Int = 3,
