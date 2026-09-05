@@ -121,11 +121,34 @@ class CameraCapturePipeline(private val context: Context) {
                 )
             }
 
+            var rotatedBitmap: android.graphics.Bitmap? = null
+            try {
+                val originalBitmap = imageProxy.toBitmap()
+                val matrix = android.graphics.Matrix().apply {
+                    postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+                    if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
+                        postScale(-1f, 1f)
+                    }
+                }
+                rotatedBitmap = android.graphics.Bitmap.createBitmap(
+                    originalBitmap,
+                    0,
+                    0,
+                    originalBitmap.width,
+                    originalBitmap.height,
+                    matrix,
+                    true
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error converting imageProxy to Bitmap", e)
+            }
+
             val frame: CameraFrame = AndroidCameraFrame(
-                width = imageProxy.width,
-                height = imageProxy.height,
+                width = rotatedBitmap?.width ?: imageProxy.width,
+                height = rotatedBitmap?.height ?: imageProxy.height,
                 rotationDegrees = imageProxy.imageInfo.rotationDegrees,
-                timestampMs = timestampMs
+                timestampMs = timestampMs,
+                bitmap = rotatedBitmap
             )
 
             try {

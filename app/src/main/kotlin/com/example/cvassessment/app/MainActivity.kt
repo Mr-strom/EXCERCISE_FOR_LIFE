@@ -6,28 +6,37 @@ import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import com.example.cvassessment.app.camera.AndroidCameraFrame
 import com.example.cvassessment.app.camera.CameraCapturePipeline
+import com.example.cvassessment.app.ui.PoseOverlayView
 import com.example.cvassessment.sdk.ExerciseAnalyzer
+import com.example.cvassessment.sdk.pose.PoseEstimator
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val MODEL_ASSET = "pose_landmarker_full.task"
     }
 
     private lateinit var cameraCapturePipeline: CameraCapturePipeline
+    private lateinit var poseEstimator: PoseEstimator
     private lateinit var previewView: PreviewView
+    private lateinit var poseOverlayView: PoseOverlayView
     private lateinit var statsTextView: TextView
     private lateinit var switchCameraButton: Button
+
+    private var poseFrameCount = 0L
+    private var lastPoseState = "NO PERSON DETECTED"
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -45,21 +54,65 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize SDK analyzer instance (proves clean integration)
+        // Initialize SDK analyzer instance
         val analyzer = ExerciseAnalyzer(exerciseId = "push_up", exerciseName = "Push-Up")
         Log.i(TAG, "ExerciseAnalyzer initialized for: ${analyzer.exerciseName}")
 
-        // Initialize Camera Capture Pipeline (Module 1)
+        // Initialize Module 2 (Pose Estimation Layer) with local asset model
+        poseEstimator = PoseEstimator(this, MODEL_ASSET)
+
+        // Initialize Module 1 (Camera Capture Pipeline)
         cameraCapturePipeline = CameraCapturePipeline(this)
 
-        // Register frame callback that delivers raw frames + timestamps for SDK consumption
+        // Wire camera frame callback directly into PoseEstimator
         cameraCapturePipeline.setFrameCallback { frame, timestampMs ->
-            // Frame callback delivering raw frames + wall-clock timestamps
-            // In Task 3, MediaPipe Pose Landmarker will consume this directly
+            processPoseFrame(frame, timestampMs)
         }
 
         setupUI()
         checkAndRequestCameraPermission()
+    }
+
+    private fun processPoseFrame(frame: com.example.cvassessment.sdk.CameraFrame, timestampMs: Long) {
+        val androidFrame = frame as? AndroidCameraFrame
+        val bitmap = androidFrame?.bitmap ?: return
+
+        val poseResult = poseEstimator.detect(bitmap, timestampMs)
+        poseFrameCount++
+
+        val isFront = (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT)
+
+        if (poseResult.hasPose && poseResult.landmarks.isNotEmpty()) {
+            val landmarks = poseResult.landmarks
+            val avgVis = poseResult.getAverageVisibility()
+            lastPoseState = "TRACKING (${landmarks.size} pts | avg vis ${String.format("%.2f", avgVis)})"
+
+            // Log all 33 landmark visibility scores periodically
+            if (poseFrameCount % 15L == 0L || poseFrameCount <= 3L) {
+                val sb = StringBuilder("BlazePose 33 Landmarks Visibility (Frame #$poseFrameCount):\n")
+                landmarks.forEach { lm ->
+                    val status = if (lm.visibility < 0.5f) " [LOW_VIS]" else ""
+                    sb.append(String.format("  [%02d] %-18s: vis=%.3f, pres=%.3f, (x=%.2f, y=%.2f, z=%.2f)%s\n",
+                        lm.index, lm.name, lm.visibility, lm.presence, lm.x, lm.y, lm.z, status))
+                }
+                Log.d("PoseTracking", sb.toString())
+            }
+
+            // Update overlay on UI thread
+            runOnUiThread {
+                poseOverlayView.updatePose(
+                    detectedLandmarks = landmarks,
+                    frameWidth = frame.width,
+                    frameHeight = frame.height,
+                    isFront = isFront
+                )
+            }
+        } else {
+            lastPoseState = "NO PERSON DETECTED"
+            runOnUiThread {
+                poseOverlayView.clear()
+            }
+        }
     }
 
     private fun setupUI() {
@@ -81,7 +134,16 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(previewView)
 
-        // 2. Real-time Frame Stats HUD Overlay
+        // 2. Visual Skeleton Overlay View on top of camera preview
+        poseOverlayView = PoseOverlayView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        rootLayout.addView(poseOverlayView)
+
+        // 3. Real-time Frame Stats HUD Overlay
         statsTextView = TextView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -92,15 +154,15 @@ class MainActivity : AppCompatActivity() {
                 leftMargin = 32
                 rightMargin = 32
             }
-            setBackgroundColor(Color.argb(170, 0, 0, 0))
+            setBackgroundColor(Color.argb(180, 0, 0, 0))
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = 13f
             setPadding(24, 20, 24, 20)
-            text = "Camera: Initializing...\nFPS: -- | Frame count: 0"
+            text = "Camera: Initializing...\nFPS: -- | Pose: Detecting..."
         }
         rootLayout.addView(statsTextView)
 
-        // 3. Camera Lens Toggle Button (Rear/Front)
+        // 4. Camera Lens Toggle Button (Rear/Front)
         switchCameraButton = Button(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -111,6 +173,7 @@ class MainActivity : AppCompatActivity() {
             }
             text = "Switch to Front Camera"
             setOnClickListener {
+                poseOverlayView.clear()
                 cameraCapturePipeline.toggleCamera(this@MainActivity, previewView)
                 updateSwitchButtonText()
             }
@@ -119,15 +182,15 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(rootLayout)
 
-        // Attach listener to update HUD with observed frame rate and timestamps
+        // Attach listener to update HUD with observed frame rate, timestamps, and pose status
         cameraCapturePipeline.onFrameStatsListener = { fps, count, deltaMs, isFront ->
             val lensName = if (isFront) "Front" else "Rear (Default)"
-            statsTextView.text = "Camera: $lensName\nFPS: ${String.format("%.1f", fps)} | Frames: $count | Delta: ${deltaMs}ms"
+            statsTextView.text = "Camera: $lensName | FPS: ${String.format("%.1f", fps)} (${deltaMs}ms)\nPose: $lastPoseState | Frames: $count"
         }
     }
 
     private fun updateSwitchButtonText() {
-        val nextLens = if (cameraCapturePipeline.currentLensFacing == androidx.camera.core.CameraSelector.LENS_FACING_BACK) {
+        val nextLens = if (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_BACK) {
             "Front"
         } else {
             "Rear"
@@ -160,6 +223,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        poseEstimator.close()
         cameraCapturePipeline.stopCamera()
     }
 }
