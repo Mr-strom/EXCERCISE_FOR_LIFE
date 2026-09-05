@@ -31,6 +31,18 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        val cardBicepCurl = findViewById<View>(R.id.cardBicepCurl)
+        cardBicepCurl.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "bicep_curl"
+            SessionDataHolder.selectedExerciseName = "Bicep Curl"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "bicep_curl")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Bicep Curl")
+            }
+            startActivity(intent)
+        }
+
         val cardSquat = findViewById<View>(R.id.cardSquat)
         cardSquat.setOnClickListener {
             SessionDataHolder.selectedExerciseId = "squat"

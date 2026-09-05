@@ -175,6 +175,76 @@ data class ExerciseConfig(
         )
 
         /**
+         * Canonical Bicep Curl specification from EXERCISE_SPEC.md.
+         *
+         * - category: dynamic_rep
+         * - primaryLandmarks: [shoulders, elbows, wrists]
+         * - trackedAngles: [elbow_angle, shoulder_stability]
+         * - phases: bottom (elbow_angle > 160°) -> top (elbow_angle < 45°) -> bottom
+         * - romDefinition: elbow_angle range top-to-bottom; 100% = reaching <= 45° at top, >= 160° at bottom
+         * - tutBaseline: 1.5s up + 1.5s down = 3.0s/rep
+         * - cameraNotes: "front or 45° preferred to see both arms; side view only tracks near-side arm"
+         */
+        val BICEP_CURL = ExerciseConfig(
+            exerciseId = "bicep_curl",
+            name = "Bicep Curl",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("shoulders", "elbows", "wrists"),
+            trackedAngles = listOf("elbow_angle", "shoulder_stability"),
+            phases = mapOf(
+                "bottom" to PhaseCondition(
+                    phaseName = "bottom",
+                    trackedAngleName = "elbow_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 160.0f,
+                    toleranceDeg = 10.0f
+                ),
+                "top" to PhaseCondition(
+                    phaseName = "top",
+                    trackedAngleName = "elbow_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 45.0f,
+                    toleranceDeg = 10.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "elbow_angle",
+                fullExpectedAngle = 45.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 160.0f,
+                description = "elbow_angle range top-to-bottom; 100% = reaching <= 45 deg at top, >= 160 deg at bottom"
+            ),
+            tutBaseline = 3.0f,
+            cameraNotes = "front or 45° preferred to see both arms; side view only tracks near-side arm",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "elbow_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_ELBOW,
+                    lastJoint = PoseLandmarkType.LEFT_WRIST,
+                    description = "Elbow angle (shoulder-elbow-wrist) for curl flexion/extension"
+                ),
+                JointAngleDefinition(
+                    angleName = "shoulder_stability",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Shoulder stability (shoulder-hip vertical) detects swinging/momentum"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_ELBOW,     // 13
+                PoseLandmarkType.RIGHT_ELBOW,    // 14
+                PoseLandmarkType.LEFT_WRIST,     // 15
+                PoseLandmarkType.RIGHT_WRIST,    // 16
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP       // 24
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

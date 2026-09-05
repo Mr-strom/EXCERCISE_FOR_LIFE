@@ -71,9 +71,16 @@ internal class OutputGate(
         // Best rep metrics per DECISIONS.md D4
         val bestRep = allRepMetrics.maxByOrNull { it.confidence }
         val romPercent = bestRep?.romPercent?.let { roundToWhole(it) }
-        val tutFactor = bestRep?.tutFactor?.let { roundTo2Decimals(it) }
 
-        // Form Factor calculation per METRICS_SPEC.md §6
+        // Consistent TuT Factor: derived directly from average rep duration and baseline
+        // so that (tutFactor * tutBaseline ≈ avgRepDurationSec)
+        val tutFactor = if (avgDuration != null && config.tutBaseline > 0.0f) {
+            roundTo2Decimals(avgDuration / config.tutBaseline)
+        } else {
+            bestRep?.tutFactor?.let { roundTo2Decimals(it) }
+        }
+
+        // Form Factor calculation per METRICS_SPEC.md §6 with per-rep deduplication
         val formFactor = computeFormFactor(exerciseState.completeRepCount, allFormErrors)
 
         val validationStatus = if (sessionConfidence >= 0.5f) {
@@ -158,6 +165,17 @@ internal class OutputGate(
             null
         }
 
+        // Form Factor with deduplication
+        val computedFormFactor = formFactor ?: computeFormFactor(completeReps ?: 0, formErrors)
+
+        val computedTutFactor = if (tutFactor != null) {
+            roundTo2Decimals(tutFactor)
+        } else if (sanitizedAvgDuration != null && config.tutBaseline > 0.0f) {
+            roundTo2Decimals(sanitizedAvgDuration / config.tutBaseline)
+        } else {
+            null
+        }
+
         if (status != ValidationStatus.VALID) {
             return SessionResult(
                 status = status,
@@ -182,8 +200,8 @@ internal class OutputGate(
             holdDurationSec = sanitizedHoldDuration,
             avgRepDurationSec = sanitizedAvgDuration,
             romPercent = romPercent?.let { roundToWhole(it) },
-            tutFactor = tutFactor?.let { roundTo2Decimals(it) },
-            formFactor = formFactor?.let { roundTo2Decimals(it) },
+            tutFactor = computedTutFactor,
+            formFactor = computedFormFactor?.let { roundTo2Decimals(it) },
             formErrors = formErrors,
             feedbackEvents = feedbackEvents
         )
@@ -224,12 +242,29 @@ internal class OutputGate(
         )
     }
 
-    private fun computeFormFactor(completeRepsCount: Int, formErrors: List<FormError>): Float? {
+    /**
+     * Form Factor per METRICS_SPEC.md §6:
+     * formFactor = 1 - (weighted_sum_of_active_form_error_severities / max_possible_severity)
+     *
+     * Deduplicates errors by (errorName, repIndex) so that multiple frame detections of the
+     * same ongoing issue within one rep count ONCE per rep for Form Factor calculation.
+     */
+    fun computeFormFactor(completeRepsCount: Int, formErrors: List<FormError>): Float? {
         if (completeRepsCount == 0) return null
         if (formErrors.isEmpty()) return 1.0f
 
-        val totalDeduction = formErrors.map { it.severity }.sum()
-        // Deductions scaled relative to rep count
+        // Deduplicate errors by (errorName, repIndex)
+        val repErrors = formErrors
+            .filter { it.repIndex != null }
+            .distinctBy { Pair(it.errorName, it.repIndex) }
+
+        val sessionLevelErrors = formErrors
+            .filter { it.repIndex == null }
+            .distinctBy { it.errorName }
+
+        val totalDeduction = repErrors.sumOf { it.severity.toDouble() }.toFloat() +
+                             sessionLevelErrors.sumOf { it.severity.toDouble() }.toFloat()
+
         val score = 1.0f - (totalDeduction / completeRepsCount)
         return score.coerceIn(0.0f, 1.0f)
     }

@@ -1,5 +1,6 @@
 package com.example.cvassessment.sdk
 
+import com.example.cvassessment.sdk.form.BicepCurlFormRuleEngine
 import com.example.cvassessment.sdk.form.FormRuleEngine
 import com.example.cvassessment.sdk.form.SquatFormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
@@ -11,8 +12,10 @@ import com.example.cvassessment.sdk.pose.PoseEstimator
 import com.example.cvassessment.sdk.pose.PoseLandmark
 import com.example.cvassessment.sdk.spec.ExerciseConfig
 import com.example.cvassessment.sdk.spec.ExerciseRegistry
+import com.example.cvassessment.sdk.statemachine.BicepCurlStateMachine
 import com.example.cvassessment.sdk.statemachine.ExerciseStateMachine
 import com.example.cvassessment.sdk.statemachine.SquatStateMachine
+import com.example.cvassessment.sdk.visibility.BicepCurlVisibilityGate
 import com.example.cvassessment.sdk.visibility.FrameVisibilityResult
 import com.example.cvassessment.sdk.visibility.SquatVisibilityGate
 import com.example.cvassessment.sdk.visibility.VisibilityGate
@@ -32,18 +35,22 @@ class ExerciseAnalyzer(
     // Fail fast on unknown exerciseId at initialization
     val config: ExerciseConfig = ExerciseRegistry.getConfig(exerciseId)
     val isSquat: Boolean = exerciseId.trim().lowercase() == "squat"
+    val isBicepCurl: Boolean = exerciseId.trim().lowercase() in listOf("bicep_curl", "bicepcurl")
 
     // Pipeline modules (enforced as internal to /sdk to maintain clean architectural boundary)
     internal val visibilityGate = VisibilityGate(exerciseId = exerciseId)
     internal val squatVisibilityGate = SquatVisibilityGate()
+    internal val bicepCurlVisibilityGate = BicepCurlVisibilityGate()
 
     internal val stateMachine = ExerciseStateMachine(config = config)
     internal val squatStateMachine = SquatStateMachine(config = config)
+    internal val bicepCurlStateMachine = BicepCurlStateMachine(config = config)
 
     internal val metricsEngine = MetricsEngine(config = config)
 
     internal val formRuleEngine = FormRuleEngine(exerciseId = exerciseId)
     internal val squatFormRuleEngine = SquatFormRuleEngine()
+    internal val bicepCurlFormRuleEngine = BicepCurlFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
     internal val squatOutputGate = SquatOutputGate(config = config)
@@ -80,25 +87,44 @@ class ExerciseAnalyzer(
      * Runs a pose estimation result through the full pipeline.
      */
     fun analyzePose(poseResult: PoseEstimationResult): FrameResult {
-        val visResult = if (isSquat) squatVisibilityGate.checkFrame(poseResult) else visibilityGate.checkFrame(poseResult)
+        val visResult = when {
+            isBicepCurl -> bicepCurlVisibilityGate.checkFrame(poseResult)
+            isSquat -> squatVisibilityGate.checkFrame(poseResult)
+            else -> visibilityGate.checkFrame(poseResult)
+        }
         val isVisible = visResult.status == VisibilityStatus.SUFFICIENT_VISIBILITY
 
-        val state = if (isSquat) squatStateMachine.processFrame(poseResult, isVisible) else stateMachine.processFrame(poseResult, isVisible)
+        val state = when {
+            isBicepCurl -> bicepCurlStateMachine.processFrame(poseResult, isVisible)
+            isSquat -> squatStateMachine.processFrame(poseResult, isVisible)
+            else -> stateMachine.processFrame(poseResult, isVisible)
+        }
         val metrics = metricsEngine.processFrame(state, poseResult, isVisible)
-        val form = if (isSquat) {
-            squatFormRuleEngine.processFrame(
-                exerciseState = state,
-                poseResult = poseResult,
-                completedRepMetrics = metrics.latestCompletedRepMetrics,
-                isVisibilitySufficient = isVisible
-            )
-        } else {
-            formRuleEngine.processFrame(
-                exerciseState = state,
-                poseResult = poseResult,
-                completedRepMetrics = metrics.latestCompletedRepMetrics,
-                isVisibilitySufficient = isVisible
-            )
+        val form = when {
+            isBicepCurl -> {
+                bicepCurlFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisible
+                )
+            }
+            isSquat -> {
+                squatFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisible
+                )
+            }
+            else -> {
+                formRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisible
+                )
+            }
         }
 
         if (isSquat) {
@@ -129,7 +155,8 @@ class ExerciseAnalyzer(
         hipLineAngle: Float,
         timestampMs: Long,
         confidence: Float = 1.0f,
-        isVisibilitySufficient: Boolean = true
+        isVisibilitySufficient: Boolean = true,
+        rightElbowAngle: Float? = null
     ): FrameResult {
         val visStatus = if (isVisibilitySufficient) {
             VisibilityStatus.SUFFICIENT_VISIBILITY
@@ -137,10 +164,19 @@ class ExerciseAnalyzer(
             VisibilityStatus.INSUFFICIENT_VISIBILITY
         }
 
-        val state = if (isSquat) {
-            squatStateMachine.processAngle(elbowAngle, hipLineAngle, timestampMs, isVisibilitySufficient)
-        } else {
-            stateMachine.processAngle(elbowAngle, hipLineAngle, timestampMs, isVisibilitySufficient)
+        val state = when {
+            isBicepCurl -> {
+                bicepCurlStateMachine.processAngles(
+                    leftAngle = elbowAngle,
+                    rightAngle = rightElbowAngle ?: elbowAngle,
+                    shoulderStabilityAngle = hipLineAngle,
+                    timestampMs = timestampMs,
+                    isVisibilitySufficient = isVisibilitySufficient,
+                    isSingleOrSynchronized = (rightElbowAngle == null)
+                )
+            }
+            isSquat -> squatStateMachine.processAngle(elbowAngle, hipLineAngle, timestampMs, isVisibilitySufficient)
+            else -> stateMachine.processAngle(elbowAngle, hipLineAngle, timestampMs, isVisibilitySufficient)
         }
 
         val mockLandmarks = config.requiredLandmarkIndices.map { index ->
@@ -153,30 +189,48 @@ class ExerciseAnalyzer(
         )
 
         val metrics = metricsEngine.processFrame(state, mockPose, isVisibilitySufficient)
-        val form = if (isSquat) {
-            squatFormRuleEngine.evaluateFrame(
-                kneeAngle = elbowAngle,
-                hipAngle = hipLineAngle,
-                phase = state.phase,
-                isRepInProgress = state.isRepInProgress,
-                currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
-                timestampMs = timestampMs,
-                confidence = confidence,
-                completedRepMetrics = metrics.latestCompletedRepMetrics,
-                landmarks = mockLandmarks,
-                isVisibilitySufficient = isVisibilitySufficient
-            )
-        } else {
-            formRuleEngine.evaluateFrame(
-                elbowAngle = elbowAngle,
-                hipLineAngle = hipLineAngle,
-                isRepInProgress = state.isRepInProgress,
-                currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
-                timestampMs = timestampMs,
-                confidence = confidence,
-                completedRepMetrics = metrics.latestCompletedRepMetrics,
-                isVisibilitySufficient = isVisibilitySufficient
-            )
+        val form = when {
+            isBicepCurl -> {
+                bicepCurlFormRuleEngine.evaluateFrame(
+                    leftElbowAngle = elbowAngle,
+                    rightElbowAngle = rightElbowAngle ?: elbowAngle,
+                    shoulderStabilityAngle = hipLineAngle,
+                    phase = state.phase,
+                    isRepInProgress = state.isRepInProgress,
+                    currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    landmarks = mockLandmarks,
+                    isVisibilitySufficient = isVisibilitySufficient
+                )
+            }
+            isSquat -> {
+                squatFormRuleEngine.evaluateFrame(
+                    kneeAngle = elbowAngle,
+                    hipAngle = hipLineAngle,
+                    phase = state.phase,
+                    isRepInProgress = state.isRepInProgress,
+                    currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    landmarks = mockLandmarks,
+                    isVisibilitySufficient = isVisibilitySufficient
+                )
+            }
+            else -> {
+                formRuleEngine.evaluateFrame(
+                    elbowAngle = elbowAngle,
+                    hipLineAngle = hipLineAngle,
+                    isRepInProgress = state.isRepInProgress,
+                    currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisibilitySufficient
+                )
+            }
         }
 
         if (isSquat) {
@@ -202,7 +256,11 @@ class ExerciseAnalyzer(
      * Evaluate frame through the Visibility Gate (Module 3).
      */
     fun checkVisibility(poseResult: PoseEstimationResult): FrameVisibilityResult {
-        return if (isSquat) squatVisibilityGate.checkFrame(poseResult) else visibilityGate.checkFrame(poseResult)
+        return when {
+            isBicepCurl -> bicepCurlVisibilityGate.checkFrame(poseResult)
+            isSquat -> squatVisibilityGate.checkFrame(poseResult)
+            else -> visibilityGate.checkFrame(poseResult)
+        }
     }
 
     /**
@@ -211,17 +269,41 @@ class ExerciseAnalyzer(
      * status is INSUFFICIENT_VISIBILITY and all metric fields are strictly null.
      */
     fun getSessionResult(): SessionResult {
-        val totalFrames = if (isSquat) squatVisibilityGate.totalFramesAnalyzed else visibilityGate.totalFramesAnalyzed
+        val totalFrames = when {
+            isBicepCurl -> bicepCurlVisibilityGate.totalFramesAnalyzed
+            isSquat -> squatVisibilityGate.totalFramesAnalyzed
+            else -> visibilityGate.totalFramesAnalyzed
+        }
         val visStatus = if (totalFrames > 0L) {
-            if (isSquat) squatVisibilityGate.getSessionVisibilityStatus() else visibilityGate.getSessionVisibilityStatus()
+            when {
+                isBicepCurl -> bicepCurlVisibilityGate.getSessionVisibilityStatus()
+                isSquat -> squatVisibilityGate.getSessionVisibilityStatus()
+                else -> visibilityGate.getSessionVisibilityStatus()
+            }
         } else {
             VisibilityStatus.SUFFICIENT_VISIBILITY
         }
 
-        val currentState = if (isSquat) squatStateMachine.currentState else stateMachine.currentState
-        val completeReps = if (isSquat) squatStateMachine.completeReps else stateMachine.completeReps
-        val sessionErrors = if (isSquat) squatFormRuleEngine.allSessionErrors else formRuleEngine.allSessionErrors
-        val feedbackEvents = if (isSquat) squatFormRuleEngine.allFeedbackEvents else formRuleEngine.allFeedbackEvents
+        val currentState = when {
+            isBicepCurl -> bicepCurlStateMachine.currentState
+            isSquat -> squatStateMachine.currentState
+            else -> stateMachine.currentState
+        }
+        val completeReps = when {
+            isBicepCurl -> bicepCurlStateMachine.completeReps
+            isSquat -> squatStateMachine.completeReps
+            else -> stateMachine.completeReps
+        }
+        val sessionErrors = when {
+            isBicepCurl -> bicepCurlFormRuleEngine.allSessionErrors
+            isSquat -> squatFormRuleEngine.allSessionErrors
+            else -> formRuleEngine.allSessionErrors
+        }
+        val feedbackEvents = when {
+            isBicepCurl -> bicepCurlFormRuleEngine.allFeedbackEvents
+            isSquat -> squatFormRuleEngine.allFeedbackEvents
+            else -> formRuleEngine.allFeedbackEvents
+        }
 
         val sessionConfidence = if (metricsEngine.allRepMetrics.isNotEmpty()) {
             metricsEngine.allRepMetrics.map { it.confidence }.average().toFloat()
@@ -270,7 +352,11 @@ class ExerciseAnalyzer(
      * Computes the Form score (0-100%) for a specific completed repetition index based on detected form errors.
      */
     fun getRepFormScore(repIndex: Int): Int {
-        val sessionErrors = if (isSquat) squatFormRuleEngine.allSessionErrors else formRuleEngine.allSessionErrors
+        val sessionErrors = when {
+            isBicepCurl -> bicepCurlFormRuleEngine.allSessionErrors
+            isSquat -> squatFormRuleEngine.allSessionErrors
+            else -> formRuleEngine.allSessionErrors
+        }
         val repErrors = sessionErrors.filter { it.repIndex == repIndex }.distinctBy { it.errorName }
         if (repErrors.isEmpty()) return 100
         val totalDeduction = repErrors.map { it.severity }.sum()
@@ -282,14 +368,22 @@ class ExerciseAnalyzer(
      * Resets all internal pipeline states.
      */
     fun reset() {
-        if (isSquat) {
-            squatVisibilityGate.reset()
-            squatStateMachine.reset()
-            squatFormRuleEngine.reset()
-        } else {
-            visibilityGate.reset()
-            stateMachine.reset()
-            formRuleEngine.reset()
+        when {
+            isBicepCurl -> {
+                bicepCurlVisibilityGate.reset()
+                bicepCurlStateMachine.reset()
+                bicepCurlFormRuleEngine.reset()
+            }
+            isSquat -> {
+                squatVisibilityGate.reset()
+                squatStateMachine.reset()
+                squatFormRuleEngine.reset()
+            }
+            else -> {
+                visibilityGate.reset()
+                stateMachine.reset()
+                formRuleEngine.reset()
+            }
         }
         metricsEngine.reset()
     }
