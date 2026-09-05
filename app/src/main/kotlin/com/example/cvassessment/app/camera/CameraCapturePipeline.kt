@@ -31,7 +31,6 @@ class CameraCapturePipeline(private val context: Context) {
 
     // Default to rear camera per ARCHITECTURE.md and requirements
     var currentLensFacing: Int = CameraSelector.LENS_FACING_BACK
-        private set
 
     private var frameCallback: FrameCallback? = null
 

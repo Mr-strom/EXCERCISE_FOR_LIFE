@@ -3,7 +3,7 @@ package com.example.cvassessment.sdk
 /**
  * Validation status of the exercise being analyzed.
  */
-enum class ValidationStatus {
+enum class ValidationStatus : java.io.Serializable {
     VALID,
     INVALID,
     INSUFFICIENT_VISIBILITY
@@ -17,7 +17,7 @@ data class FormError(
     val confidence: Float,
     val repIndex: Int?,
     val severity: Float = 0.5f
-)
+) : java.io.Serializable
 
 /**
  * Audio or visual feedback event triggered by the SDK.
@@ -26,7 +26,7 @@ data class FeedbackEvent(
     val message: String,
     val timestampMs: Long,
     val relatedError: String? = null
-)
+) : java.io.Serializable
 
 /**
  * Final structured session result representing the complete evaluation of an exercise session.
@@ -43,7 +43,7 @@ data class SessionResult(
     val formFactor: Float? = null,
     val formErrors: List<FormError> = emptyList(),
     val feedbackEvents: List<FeedbackEvent> = emptyList()
-)
+) : java.io.Serializable
 
 /**
  * Abstraction for camera frame input.
