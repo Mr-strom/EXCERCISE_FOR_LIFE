@@ -78,5 +78,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardCalfRaise = findViewById<View>(R.id.cardCalfRaise)
+        cardCalfRaise.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "calf_raise"
+            SessionDataHolder.selectedExerciseName = "Calf Raise"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "calf_raise")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Calf Raise")
+            }
+            startActivity(intent)
+        }
     }
 }

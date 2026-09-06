@@ -392,6 +392,68 @@ data class ExerciseConfig(
         )
 
         /**
+         * Calf Raise specification per EXERCISE_SPEC.md #6 and DECISIONS.md D7:
+         * - category: dynamic_rep
+         * - primaryLandmarks: [ankles, knees, heels, foot_indices]
+         * - trackedAngles: [ankle_vertical_displacement] (heel height relative to calibrated standing baseline)
+         * - phases: bottom (heel at ground baseline) -> top (max heel elevation) -> bottom
+         * - romDefinition: heel vertical displacement relative to calibrated standing baseline; 100% = max individual elevation achieved in first rep
+         * - tutBaseline: 1.0s up + 1.0s down = 2.0s/rep
+         * - cameraNotes: "side view required; front/45° cannot reliably detect heel elevation"
+         */
+        val CALF_RAISE = ExerciseConfig(
+            exerciseId = "calf_raise",
+            name = "Calf Raise",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("ankles", "knees", "heels", "foot_indices"),
+            trackedAngles = listOf("ankle_vertical_displacement"),
+            phases = mapOf(
+                "bottom" to PhaseCondition(
+                    phaseName = "bottom",
+                    trackedAngleName = "ankle_vertical_displacement",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 0.02f,
+                    toleranceDeg = 0.01f
+                ),
+                "top" to PhaseCondition(
+                    phaseName = "top",
+                    trackedAngleName = "ankle_vertical_displacement",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 0.05f,
+                    toleranceDeg = 0.02f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "ankle_vertical_displacement",
+                fullExpectedAngle = 100.0f,
+                minimumAcceptablePercent = 50.0f,
+                startingAngle = 0.0f,
+                description = "heel vertical displacement relative to calibrated standing baseline; 100% = max individual elevation in first rep"
+            ),
+            tutBaseline = 2.0f,
+            cameraNotes = "side view required; front/45° cannot reliably detect heel elevation",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "ankle_vertical_displacement",
+                    firstJoint = PoseLandmarkType.LEFT_KNEE,
+                    vertexJoint = PoseLandmarkType.LEFT_ANKLE,
+                    lastJoint = PoseLandmarkType.LEFT_HEEL,
+                    description = "Vertical elevation displacement of heel relative to calibrated baseline"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_KNEE,        // 25
+                PoseLandmarkType.RIGHT_KNEE,       // 26
+                PoseLandmarkType.LEFT_ANKLE,       // 27
+                PoseLandmarkType.RIGHT_ANKLE,      // 28
+                PoseLandmarkType.LEFT_HEEL,        // 29
+                PoseLandmarkType.RIGHT_HEEL,       // 30
+                PoseLandmarkType.LEFT_FOOT_INDEX,  // 31
+                PoseLandmarkType.RIGHT_FOOT_INDEX  // 32
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

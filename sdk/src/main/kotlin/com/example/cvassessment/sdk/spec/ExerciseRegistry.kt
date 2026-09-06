@@ -15,7 +15,8 @@ object ExerciseRegistry {
         ExerciseConfig.SQUAT.exerciseId to ExerciseConfig.SQUAT,
         ExerciseConfig.BICEP_CURL.exerciseId to ExerciseConfig.BICEP_CURL,
         ExerciseConfig.SHOULDER_PRESS.exerciseId to ExerciseConfig.SHOULDER_PRESS,
-        ExerciseConfig.LUNGE.exerciseId to ExerciseConfig.LUNGE
+        ExerciseConfig.LUNGE.exerciseId to ExerciseConfig.LUNGE,
+        ExerciseConfig.CALF_RAISE.exerciseId to ExerciseConfig.CALF_RAISE
     )
 
     /**
