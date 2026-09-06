@@ -254,13 +254,15 @@ class StartCameraActivity : AppCompatActivity() {
 
         val elapsedMs = timestampMs - analysisStartTimeMs
 
+        val isLowLight = (frame as? com.example.cvassessment.app.camera.AndroidCameraFrame)?.isLowLight ?: false
+
         if (!isAnalysisComplete) {
             // Accumulate samples continuously during the 7 seconds
-            setupAnalysisEvaluator.recordSample(detectedLandmarks, hasPose)
+            setupAnalysisEvaluator.recordSample(detectedLandmarks, hasPose, isLowLight)
 
             if (elapsedMs < ANALYSIS_DURATION_MS) {
                 val remainingSec = ceil((ANALYSIS_DURATION_MS - elapsedMs) / 1000.0).toInt().coerceAtLeast(1)
-                val liveOrientationHint = setupAnalysisEvaluator.getLiveOrientationHint(detectedLandmarks)
+                val liveFramingHint = setupAnalysisEvaluator.getLiveFramingHint(detectedLandmarks, isLowLight)
 
                 runOnUiThread {
                     stickmanView.updateTrackingQuality(
@@ -275,8 +277,8 @@ class StartCameraActivity : AppCompatActivity() {
                     btnStartExercise.text = "Analyzing (${remainingSec}s)..."
                     btnStartExercise.isEnabled = false
 
-                    if (liveOrientationHint != null) {
-                        tvStatusTip.text = liveOrientationHint
+                    if (liveFramingHint != null) {
+                        tvStatusTip.text = liveFramingHint
                         tvStatusTip.setTextColor(Color.parseColor("#FFD600"))
                     } else {
                         tvStatusTip.text = "Keep your full body visible in the frame"

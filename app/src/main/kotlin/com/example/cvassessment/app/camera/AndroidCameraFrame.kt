@@ -11,5 +11,8 @@ data class AndroidCameraFrame(
     override val height: Int,
     override val rotationDegrees: Int,
     override val timestampMs: Long,
-    val bitmap: Bitmap? = null
+    val bitmap: Bitmap? = null,
+    val isLowLight: Boolean = false,
+    val averageLuminance: Float = 128f
 ) : CameraFrame
+

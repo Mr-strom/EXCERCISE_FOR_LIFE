@@ -61,14 +61,19 @@ class SetupAnalysisEvaluator(
 
     private var totalSamples: Int = 0
     private var poseSamples: Int = 0
+    private var lowLightSamples: Int = 0
 
     private val visibilitySamples = mutableMapOf<Int, MutableList<Float>>()
     private val xSamples = mutableMapOf<Int, MutableList<Float>>()
     private val ySamples = mutableMapOf<Int, MutableList<Float>>()
 
+    /**
+     * Resets internal sample buffers between analysis runs.
+     */
     fun reset() {
         totalSamples = 0
         poseSamples = 0
+        lowLightSamples = 0
         visibilitySamples.clear()
         xSamples.clear()
         ySamples.clear()
@@ -77,8 +82,11 @@ class SetupAnalysisEvaluator(
     /**
      * Records a single frame sample during the 7-second analysis window.
      */
-    fun recordSample(landmarks: List<PoseLandmark>, hasPose: Boolean) {
+    fun recordSample(landmarks: List<PoseLandmark>, hasPose: Boolean, isLowLight: Boolean = false) {
         totalSamples++
+        if (isLowLight) {
+            lowLightSamples++
+        }
         if (hasPose && landmarks.isNotEmpty()) {
             poseSamples++
             val landmarkMap = landmarks.associateBy { it.index }
@@ -92,6 +100,80 @@ class SetupAnalysisEvaluator(
                 }
             }
         }
+    }
+
+    /**
+     * Provides a live framing hint during the 7-second analysis countdown
+     * covering camera height/floor angle, distance (<40% or >85%), lighting,
+     * and exercise orientation.
+     */
+    fun getLiveFramingHint(landmarks: List<PoseLandmark>, isLowLight: Boolean = false): String? {
+        if (landmarks.isEmpty()) return null
+        if (isLowLight) {
+            return "Low light detected — move to a brighter area"
+        }
+
+        val landmarkMap = landmarks.associateBy { it.index }
+        val leftShoulder = landmarkMap[PoseLandmarkType.LEFT_SHOULDER]
+        val rightShoulder = landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]
+        val leftHip = landmarkMap[PoseLandmarkType.LEFT_HIP]
+        val rightHip = landmarkMap[PoseLandmarkType.RIGHT_HIP]
+        val leftAnkle = landmarkMap[PoseLandmarkType.LEFT_ANKLE]
+        val rightAnkle = landmarkMap[PoseLandmarkType.RIGHT_ANKLE]
+
+        val viewReq = getViewRequirement()
+        val shoulderWidth = if (leftShoulder != null && rightShoulder != null &&
+            leftShoulder.visibility >= 0.35f && rightShoulder.visibility >= 0.35f) {
+            kotlin.math.abs(leftShoulder.x - rightShoulder.x)
+        } else null
+
+        // 1. Strict view requirement violation
+        if (shoulderWidth != null) {
+            if (viewReq == CameraViewRequirement.SIDE_REQUIRED && shoulderWidth > 0.18f) {
+                return "Turn sideways for this exercise"
+            }
+            if (viewReq == CameraViewRequirement.FRONT_REQUIRED && shoulderWidth < 0.10f) {
+                return "Face the camera for this exercise"
+            }
+        }
+
+        // 2. Camera height / floor angle heuristic:
+        // When phone is placed on the floor tilted upward, the torso projection is severely foreshortened (ratio < 0.42)
+        val validShouldersY = listOfNotNull(leftShoulder?.takeIf { it.visibility >= 0.35f }?.y, rightShoulder?.takeIf { it.visibility >= 0.35f }?.y)
+        val validHipsY = listOfNotNull(leftHip?.takeIf { it.visibility >= 0.35f }?.y, rightHip?.takeIf { it.visibility >= 0.35f }?.y)
+        val validAnklesY = listOfNotNull(leftAnkle?.takeIf { it.visibility >= 0.35f }?.y, rightAnkle?.takeIf { it.visibility >= 0.35f }?.y)
+
+        if (validShouldersY.isNotEmpty() && validHipsY.isNotEmpty() && validAnklesY.isNotEmpty()) {
+            val shoulderY = validShouldersY.average().toFloat()
+            val hipY = validHipsY.average().toFloat()
+            val ankleY = validAnklesY.average().toFloat()
+            if (hipY > shoulderY && ankleY > hipY) {
+                val torsoSpan = hipY - shoulderY
+                val legSpan = ankleY - hipY
+                if (legSpan > 0.10f && torsoSpan > 0.05f) {
+                    if (torsoSpan / legSpan < 0.42f || torsoSpan / legSpan > 1.35f) {
+                        return "Place your phone at waist-to-chest height, not on the floor"
+                    }
+                }
+            }
+        }
+
+        // 3. Distance check using bounding box height
+        val validY = landmarks.filter { it.visibility >= 0.30f }.map { it.y }
+        if (validY.isNotEmpty()) {
+            val minY = validY.minOrNull() ?: 0.5f
+            val maxY = validY.maxOrNull() ?: 0.5f
+            val bboxHeight = maxY - minY
+            if (bboxHeight < 0.40f) {
+                return "Move closer"
+            }
+            if (bboxHeight > 0.85f) {
+                return "Move back — you're too close"
+            }
+        }
+
+        // 4. Orientation hint for preferred exercises or fallback
+        return getLiveOrientationHint(landmarks)
     }
 
     /**
@@ -190,16 +272,42 @@ class SetupAnalysisEvaluator(
 
         val overallConfidence = avgVis.values.average().toFloat()
 
-        // Coordinate boundary checks
+        // Coordinate boundary and distance checks
         val maxAnkleY = maxOf(avgY[PoseLandmarkType.LEFT_ANKLE] ?: 0.5f, avgY[PoseLandmarkType.RIGHT_ANKLE] ?: 0.5f)
         val minShoulderY = minOf(avgY[PoseLandmarkType.LEFT_SHOULDER] ?: 0.5f, avgY[PoseLandmarkType.RIGHT_SHOULDER] ?: 0.5f)
         val maxHipX = maxOf(avgX[PoseLandmarkType.LEFT_HIP] ?: 0.5f, avgX[PoseLandmarkType.RIGHT_HIP] ?: 0.5f)
         val minHipX = minOf(avgX[PoseLandmarkType.LEFT_HIP] ?: 0.5f, avgX[PoseLandmarkType.RIGHT_HIP] ?: 0.5f)
 
+        // Bounding box height relative to frame height
+        val minY = avgY.values.minOrNull() ?: 0.5f
+        val maxY = avgY.values.maxOrNull() ?: 0.5f
+        val bboxHeight = maxY - minY
+        val isTooFar = bboxHeight < 0.40f
+        val isTooClose = bboxHeight > 0.85f
+
         val isCutOff = maxAnkleY > 0.90f || minShoulderY < 0.08f || maxHipX > 0.90f || minHipX < 0.10f
+
+        // Camera height / floor angle check via vertical foreshortening of torso vs legs
+        val avgLeftShoulderY = avgY[PoseLandmarkType.LEFT_SHOULDER] ?: 0.5f
+        val avgRightShoulderY = avgY[PoseLandmarkType.RIGHT_SHOULDER] ?: 0.5f
+        val avgShoulderY = (avgLeftShoulderY + avgRightShoulderY) / 2f
+
+        val avgLeftHipY = avgY[PoseLandmarkType.LEFT_HIP] ?: 0.5f
+        val avgRightHipY = avgY[PoseLandmarkType.RIGHT_HIP] ?: 0.5f
+        val avgHipY = (avgLeftHipY + avgRightHipY) / 2f
+
+        val avgLeftAnkleY = avgY[PoseLandmarkType.LEFT_ANKLE] ?: 0.5f
+        val avgRightAnkleY = avgY[PoseLandmarkType.RIGHT_ANKLE] ?: 0.5f
+        val avgAnkleY = (avgLeftAnkleY + avgRightAnkleY) / 2f
+
+        val torsoSpan = avgHipY - avgShoulderY
+        val legSpan = avgAnkleY - avgHipY
+        val isCameraHeightProblem = (legSpan > 0.10f && torsoSpan > 0.05f) &&
+            (torsoSpan / legSpan < 0.42f || torsoSpan / legSpan > 1.35f)
 
         val maxLimbScore = maxOf(leftArmScore, rightArmScore, leftLegScore, rightLegScore)
         val isUniformlyLow = overallConfidence < 0.45f && maxLimbScore < 0.48f
+        val isLowLightDetected = totalSamples > 0 && (lowLightSamples.toFloat() / totalSamples.toFloat() > 0.50f)
 
         // View orientation check
         val avgLeftShoulderX = avgX[PoseLandmarkType.LEFT_SHOULDER] ?: 0.5f
@@ -220,8 +328,7 @@ class SetupAnalysisEvaluator(
         var canStartAnyway = true
 
         when {
-            // 1. Strict view requirement violation (Calf Raise, Jumping Jack, Plank, Side Plank, Mountain Climber)
-            // "Start Anyway" is NOT offered if wrong view is detected because the exercise gate will immediately fail
+            // 1. Strict view requirement violation
             isWrongViewForStrictExercise -> {
                 isGood = false
                 canStartAnyway = false
@@ -234,21 +341,48 @@ class SetupAnalysisEvaluator(
                 }
             }
 
-            // 2. Boundary / full body cut off
+            // 2. Camera height / floor angle issue (e.g. phone propped low on floor pointing up)
+            isCameraHeightProblem -> {
+                isGood = false
+                headline = "Place your phone at waist-to-chest height, not on the floor"
+                actionableTip = "Elevate your phone to waist or chest level for accurate angle tracking."
+            }
+
+            // 3. Distance: Person too far (< 40% frame height)
+            isTooFar -> {
+                isGood = false
+                headline = "Move closer"
+                actionableTip = "Step closer so your body fills more of the frame."
+            }
+
+            // 4. Distance: Person too close (> 85% frame height)
+            isTooClose -> {
+                isGood = false
+                headline = "Move back — you're too close"
+                actionableTip = "Step back until your head, arms, and feet fit comfortably inside the frame."
+            }
+
+            // 5. Boundary / full body cut off
             isCutOff -> {
                 isGood = false
                 headline = "Move back — we can't see your full body"
                 actionableTip = "Step back until your head, arms, and feet fit comfortably inside the frame."
             }
 
-            // 3. Uniformly low visibility across all landmarks (poor lighting)
+            // 6. Low light detected via luminance or uniformly low landmark visibility
+            isLowLightDetected -> {
+                isGood = false
+                headline = "Low light detected — move to a brighter area"
+                actionableTip = "Increase the lighting in front of you so your silhouette is clear."
+            }
+
             isUniformlyLow -> {
                 isGood = false
                 headline = "Move to better lighting"
                 actionableTip = "Increase the lighting in front of you so your silhouette is clear."
             }
 
-            // 4. Specific limb poorly tracked
+            // 7. Specific limb poorly tracked
             rightArmScore < 0.40f -> {
                 isGood = false
                 headline = "We can't see your right arm — try adjusting your angle"

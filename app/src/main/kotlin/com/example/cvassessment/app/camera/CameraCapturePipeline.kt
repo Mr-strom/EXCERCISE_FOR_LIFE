@@ -24,6 +24,38 @@ class CameraCapturePipeline(private val context: Context) {
 
     companion object {
         private const val TAG = "CameraCapturePipeline"
+        const val LOW_LIGHT_THRESHOLD_LUMINANCE = 35.0f
+
+        /**
+         * Computes average perceptual luminance (0..255) of a Bitmap
+         * using ITU-R BT.601 standard weights: Y = 0.299*R + 0.587*G + 0.114*B.
+         */
+        fun computeAverageLuminance(bitmap: android.graphics.Bitmap): Float {
+            return computeLuminance(bitmap.width, bitmap.height) { x, y -> bitmap.getPixel(x, y) }
+        }
+
+        /**
+         * Computes perceptual luminance given dimensions and a pixel provider lambda.
+         * Testable on standard JVM without requiring native Android Bitmap runtime.
+         */
+        fun computeLuminance(width: Int, height: Int, getPixel: (x: Int, y: Int) -> Int): Float {
+            var totalLuminance = 0.0
+            var count = 0
+            val stepX = (width / 16).coerceAtLeast(1)
+            val stepY = (height / 16).coerceAtLeast(1)
+            for (y in 0 until height step stepY) {
+                for (x in 0 until width step stepX) {
+                    val pixel = getPixel(x, y)
+                    val r = (pixel shr 16) and 0xFF
+                    val g = (pixel shr 8) and 0xFF
+                    val b = pixel and 0xFF
+                    val lum = 0.299f * r + 0.587f * g + 0.114f * b
+                    totalLuminance += lum
+                    count++
+                }
+            }
+            return if (count > 0) (totalLuminance / count).toFloat() else 128f
+        }
     }
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -39,6 +71,10 @@ class CameraCapturePipeline(private val context: Context) {
     private var lastFrameTimeMs: Long = 0L
     private var smoothedFps: Float = 0f
 
+    // Low light tracking metrics
+    private var currentLuminance: Float = 128f
+    private var currentIsLowLight: Boolean = false
+
     // Callback for UI updates (e.g. FPS display)
     var onFrameStatsListener: ((fps: Float, frameCount: Long, deltaMs: Long, isFront: Boolean) -> Unit)? = null
 
@@ -53,11 +89,18 @@ class CameraCapturePipeline(private val context: Context) {
      * Start the camera stream binding preview to the given PreviewView.
      */
     fun startCamera(lifecycleOwner: LifecycleOwner, previewView: PreviewView, onStarted: (() -> Unit)? = null) {
+        // Enforce COMPATIBLE mode (TextureView) to eliminate black preview screens
+        // caused by SurfaceView surface detachment and layout-timing issues
+        previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
-            bindCameraUseCases(lifecycleOwner, previewView)
-            onStarted?.invoke()
+            // Ensure previewView is attached and laid out before binding use cases
+            previewView.post {
+                bindCameraUseCases(lifecycleOwner, previewView)
+                onStarted?.invoke()
+            }
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -65,6 +108,7 @@ class CameraCapturePipeline(private val context: Context) {
      * Toggle between rear (default) and front camera.
      */
     fun toggleCamera(lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
+        previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         currentLensFacing = if (currentLensFacing == CameraSelector.LENS_FACING_BACK) {
             CameraSelector.LENS_FACING_FRONT
         } else {
@@ -79,6 +123,9 @@ class CameraCapturePipeline(private val context: Context) {
             Log.e(TAG, "CameraProvider not initialized yet")
             return
         }
+
+        // Enforce COMPATIBLE mode (TextureView) for reliable preview rendering
+        previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
 
         // Unbind previous use cases before rebinding
         provider.unbindAll()
@@ -142,12 +189,24 @@ class CameraCapturePipeline(private val context: Context) {
                 Log.e(TAG, "Error converting imageProxy to Bitmap", e)
             }
 
+            // Track frame luminance to detect low light
+            if (rotatedBitmap != null && (frameCount % 10L == 0L || frameCount <= 3L)) {
+                try {
+                    currentLuminance = computeAverageLuminance(rotatedBitmap)
+                    currentIsLowLight = currentLuminance < LOW_LIGHT_THRESHOLD_LUMINANCE
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error computing luminance", e)
+                }
+            }
+
             val frame: CameraFrame = AndroidCameraFrame(
                 width = rotatedBitmap?.width ?: imageProxy.width,
                 height = rotatedBitmap?.height ?: imageProxy.height,
                 rotationDegrees = imageProxy.imageInfo.rotationDegrees,
                 timestampMs = timestampMs,
-                bitmap = rotatedBitmap
+                bitmap = rotatedBitmap,
+                isLowLight = currentIsLowLight,
+                averageLuminance = currentLuminance
             )
 
             try {

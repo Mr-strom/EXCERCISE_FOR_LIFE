@@ -401,6 +401,98 @@ class AppFlowTest {
     }
 
     @Test
+    fun testSetupAnalysisEvaluatorLowLightDetection() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        val normalLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.70f),
+            createLandmark(12, 0.55f, 0.30f, 0.70f),
+            createLandmark(23, 0.46f, 0.55f, 0.70f),
+            createLandmark(24, 0.54f, 0.55f, 0.70f),
+            createLandmark(27, 0.47f, 0.80f, 0.70f),
+            createLandmark(28, 0.53f, 0.80f, 0.70f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(normalLandmarks, hasPose = true, isLowLight = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Low light setup should not be marked good", result.isGood)
+        assertEquals("Low light detected — move to a brighter area", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorMoveCloserWhenTooFar() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        // Subject occupies only 20% of the vertical frame (0.45 to 0.65)
+        val farLandmarks = listOf(
+            createLandmark(11, 0.48f, 0.45f, 0.85f),
+            createLandmark(12, 0.52f, 0.45f, 0.85f),
+            createLandmark(23, 0.48f, 0.55f, 0.85f),
+            createLandmark(24, 0.52f, 0.55f, 0.85f),
+            createLandmark(27, 0.48f, 0.65f, 0.85f),
+            createLandmark(28, 0.52f, 0.65f, 0.85f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(farLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Too far setup should not be marked good", result.isGood)
+        assertEquals("Move closer", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorMoveBackWhenTooClose() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
+        // Subject occupies 88% of vertical frame (0.05 to 0.93)
+        val closeLandmarks = listOf(
+            createLandmark(11, 0.35f, 0.05f, 0.90f),
+            createLandmark(12, 0.65f, 0.05f, 0.90f),
+            createLandmark(23, 0.40f, 0.45f, 0.90f),
+            createLandmark(24, 0.60f, 0.45f, 0.90f),
+            createLandmark(27, 0.42f, 0.93f, 0.90f),
+            createLandmark(28, 0.58f, 0.93f, 0.90f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(closeLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Too close setup should not be marked good", result.isGood)
+        assertEquals("Move back — you're too close", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
+
+    @Test
+    fun testSetupAnalysisEvaluatorCameraHeightFloorAngleWarning() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("squat")
+        // Phone propped low to the ground pointed upward:
+        // Torso span = 0.57 - 0.50 = 0.07; Leg span = 0.82 - 0.57 = 0.25 -> ratio 0.28 (< 0.42)
+        val floorAngleLandmarks = listOf(
+            createLandmark(11, 0.46f, 0.50f, 0.85f),
+            createLandmark(12, 0.54f, 0.50f, 0.85f),
+            createLandmark(23, 0.47f, 0.57f, 0.85f),
+            createLandmark(24, 0.53f, 0.57f, 0.85f),
+            createLandmark(27, 0.47f, 0.82f, 0.85f),
+            createLandmark(28, 0.53f, 0.82f, 0.85f)
+        )
+
+        for (i in 1..200) {
+            evaluator.recordSample(floorAngleLandmarks, hasPose = true)
+        }
+
+        val result = evaluator.evaluate()
+        org.junit.Assert.assertFalse("Low-angle floor setup should not be marked good", result.isGood)
+        assertEquals("Place your phone at waist-to-chest height, not on the floor", result.headline)
+        assertTrue(result.canStartAnyway)
+    }
+
+    @Test
     fun testSetupAnalysisEvaluatorNoPersonDetected() {
         val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator()
 
@@ -795,6 +887,61 @@ class AppFlowTest {
         val jackEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("jumping_jack")
         assertEquals("Face the camera for this exercise", jackEvaluator.getLiveOrientationHint(sideLandmarks))
         assertNull(jackEvaluator.getLiveOrientationHint(frontLandmarks))
+    }
+
+    /**
+     * Acceptance Test: Live framing hints covering camera height, distance, and lighting during countdown.
+     */
+    @Test
+    fun testLiveFramingHintsDuringAnalysis() {
+        val evaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("squat")
+
+        // 1. Low light condition
+        val normalLandmarks = listOf(
+            createLandmark(11, 0.45f, 0.30f, 0.85f),
+            createLandmark(12, 0.55f, 0.30f, 0.85f),
+            createLandmark(23, 0.46f, 0.55f, 0.85f),
+            createLandmark(24, 0.54f, 0.55f, 0.85f),
+            createLandmark(27, 0.47f, 0.80f, 0.85f),
+            createLandmark(28, 0.53f, 0.80f, 0.85f)
+        )
+        assertEquals("Low light detected — move to a brighter area", evaluator.getLiveFramingHint(normalLandmarks, isLowLight = true))
+
+        // 2. Camera on floor tilted upward (torso foreshortened: ratio < 0.42)
+        val floorAngleLandmarks = listOf(
+            createLandmark(11, 0.46f, 0.50f, 0.85f),
+            createLandmark(12, 0.54f, 0.50f, 0.85f),
+            createLandmark(23, 0.47f, 0.57f, 0.85f),
+            createLandmark(24, 0.53f, 0.57f, 0.85f),
+            createLandmark(27, 0.47f, 0.82f, 0.85f),
+            createLandmark(28, 0.53f, 0.82f, 0.85f)
+        )
+        assertEquals("Place your phone at waist-to-chest height, not on the floor", evaluator.getLiveFramingHint(floorAngleLandmarks, isLowLight = false))
+
+        // 3. Subject too far (bbox < 40%)
+        val farLandmarks = listOf(
+            createLandmark(11, 0.48f, 0.45f, 0.85f),
+            createLandmark(12, 0.52f, 0.45f, 0.85f),
+            createLandmark(23, 0.48f, 0.55f, 0.85f),
+            createLandmark(24, 0.52f, 0.55f, 0.85f),
+            createLandmark(27, 0.48f, 0.65f, 0.85f),
+            createLandmark(28, 0.52f, 0.65f, 0.85f)
+        )
+        assertEquals("Move closer", evaluator.getLiveFramingHint(farLandmarks, isLowLight = false))
+
+        // 4. Subject too close (bbox > 85%)
+        val closeLandmarks = listOf(
+            createLandmark(11, 0.35f, 0.05f, 0.90f),
+            createLandmark(12, 0.65f, 0.05f, 0.90f),
+            createLandmark(23, 0.40f, 0.45f, 0.90f),
+            createLandmark(24, 0.60f, 0.45f, 0.90f),
+            createLandmark(27, 0.42f, 0.93f, 0.90f),
+            createLandmark(28, 0.58f, 0.93f, 0.90f)
+        )
+        assertEquals("Move back — you're too close", evaluator.getLiveFramingHint(closeLandmarks, isLowLight = false))
+
+        // 5. Normal optimal framing (no warnings)
+        assertNull(evaluator.getLiveFramingHint(normalLandmarks, isLowLight = false))
     }
 
     /**
