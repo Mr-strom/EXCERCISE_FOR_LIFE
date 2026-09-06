@@ -82,9 +82,15 @@ class ResultsActivity : AppCompatActivity() {
             tvResultConfidence.text = "${sessionResult.confidence} ($confPct%)"
 
             // Reps & Durations
-            tvCompleteReps.text = sessionResult.completeReps?.toString() ?: "N/A (Suppressed)"
-            tvIncompleteReps.text = sessionResult.incompleteReps?.toString() ?: "N/A (Suppressed)"
-            tvAvgDuration.text = if (sessionResult.avgRepDurationSec != null) "${sessionResult.avgRepDurationSec} s" else "N/A"
+            if (sessionResult.holdDurationSec != null) {
+                tvCompleteReps.text = "${sessionResult.holdDurationSec}s (Hold Duration)"
+                tvIncompleteReps.text = "N/A (Static Hold)"
+                tvAvgDuration.text = "N/A (Static Hold)"
+            } else {
+                tvCompleteReps.text = sessionResult.completeReps?.toString() ?: "N/A (Suppressed)"
+                tvIncompleteReps.text = sessionResult.incompleteReps?.toString() ?: "N/A (Suppressed)"
+                tvAvgDuration.text = if (sessionResult.avgRepDurationSec != null) "${sessionResult.avgRepDurationSec} s" else "N/A"
+            }
 
             // Algorithmic Metrics
             val rom = sessionResult.romPercent

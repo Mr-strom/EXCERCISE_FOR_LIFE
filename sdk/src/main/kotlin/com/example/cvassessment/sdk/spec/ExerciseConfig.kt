@@ -454,6 +454,75 @@ data class ExerciseConfig(
         )
 
         /**
+         * Plank specification per EXERCISE_SPEC.md #7 and METRICS_SPEC.md §2, §4, §5:
+         * - category: static_hold
+         * - primaryLandmarks: [shoulders, hips, ankles, elbows]
+         * - trackedAngles: [hip_line_angle] (shoulder-hip-ankle straight-line deviation)
+         * - phases: hold_start (position achieved: hip_line_angle within tolerance of 180°) -> holding -> hold_end (position lost)
+         * - romDefinition: postural deviation from ideal straight line; 180° = 100%, deviation reduces %
+         * - tutBaseline: 30.0s (reference hold duration)
+         * - cameraNotes: "side view essential for hip-line straightness detection"
+         */
+        val PLANK = ExerciseConfig(
+            exerciseId = "plank",
+            name = "Plank",
+            category = ExerciseCategory.STATIC_HOLD,
+            primaryLandmarks = listOf("shoulders", "hips", "ankles", "elbows"),
+            trackedAngles = listOf("hip_line_angle"),
+            phases = mapOf(
+                "hold_start" to PhaseCondition(
+                    phaseName = "hold_start",
+                    trackedAngleName = "hip_line_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 180.0f,
+                    toleranceDeg = 15.0f
+                ),
+                "holding" to PhaseCondition(
+                    phaseName = "holding",
+                    trackedAngleName = "hip_line_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 180.0f,
+                    toleranceDeg = 15.0f
+                ),
+                "hold_end" to PhaseCondition(
+                    phaseName = "hold_end",
+                    trackedAngleName = "hip_line_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 165.0f,
+                    toleranceDeg = 0.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "hip_line_angle",
+                fullExpectedAngle = 180.0f,
+                minimumAcceptablePercent = 70.0f,
+                startingAngle = 180.0f,
+                description = "postural deviation from ideal straight line; 180° = 100%, deviation reduces %"
+            ),
+            tutBaseline = 30.0f,
+            cameraNotes = "side view essential for hip-line straightness detection",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "hip_line_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Hip line angle formed by shoulder, hip, and ankle"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_ELBOW,     // 13
+                PoseLandmarkType.RIGHT_ELBOW,    // 14
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE     // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

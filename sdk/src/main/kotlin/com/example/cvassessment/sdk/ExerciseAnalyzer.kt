@@ -4,6 +4,7 @@ import com.example.cvassessment.sdk.form.BicepCurlFormRuleEngine
 import com.example.cvassessment.sdk.form.CalfRaiseFormRuleEngine
 import com.example.cvassessment.sdk.form.FormRuleEngine
 import com.example.cvassessment.sdk.form.LungeFormRuleEngine
+import com.example.cvassessment.sdk.form.PlankFormRuleEngine
 import com.example.cvassessment.sdk.form.ShoulderPressFormRuleEngine
 import com.example.cvassessment.sdk.form.SquatFormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
@@ -21,12 +22,15 @@ import com.example.cvassessment.sdk.statemachine.CalfRaiseStateMachine
 import com.example.cvassessment.sdk.statemachine.ExerciseStateMachine
 import com.example.cvassessment.sdk.statemachine.LungeGeometry
 import com.example.cvassessment.sdk.statemachine.LungeStateMachine
+import com.example.cvassessment.sdk.statemachine.PlankGeometry
+import com.example.cvassessment.sdk.statemachine.PlankStateMachine
 import com.example.cvassessment.sdk.statemachine.ShoulderPressStateMachine
 import com.example.cvassessment.sdk.statemachine.SquatStateMachine
 import com.example.cvassessment.sdk.visibility.BicepCurlVisibilityGate
 import com.example.cvassessment.sdk.visibility.CalfRaiseVisibilityGate
 import com.example.cvassessment.sdk.visibility.FrameVisibilityResult
 import com.example.cvassessment.sdk.visibility.LungeVisibilityGate
+import com.example.cvassessment.sdk.visibility.PlankVisibilityGate
 import com.example.cvassessment.sdk.visibility.ShoulderPressVisibilityGate
 import com.example.cvassessment.sdk.visibility.SquatVisibilityGate
 import com.example.cvassessment.sdk.visibility.VisibilityGate
@@ -50,6 +54,7 @@ class ExerciseAnalyzer(
     val isShoulderPress: Boolean = exerciseId.trim().lowercase() in listOf("shoulder_press", "shoulderpress")
     val isLunge: Boolean = exerciseId.trim().lowercase() == "lunge"
     val isCalfRaise: Boolean = exerciseId.trim().lowercase() in listOf("calf_raise", "calfraise")
+    val isPlank: Boolean = exerciseId.trim().lowercase() == "plank"
 
     // Pipeline modules (enforced as internal to /sdk to maintain clean architectural boundary)
     internal val visibilityGate = VisibilityGate(exerciseId = exerciseId)
@@ -58,6 +63,7 @@ class ExerciseAnalyzer(
     internal val shoulderPressVisibilityGate = ShoulderPressVisibilityGate()
     internal val lungeVisibilityGate = LungeVisibilityGate()
     internal val calfRaiseVisibilityGate = CalfRaiseVisibilityGate()
+    internal val plankVisibilityGate = PlankVisibilityGate()
 
     internal val stateMachine = ExerciseStateMachine(config = config)
     internal val squatStateMachine = SquatStateMachine(config = config)
@@ -65,6 +71,7 @@ class ExerciseAnalyzer(
     internal val shoulderPressStateMachine = ShoulderPressStateMachine(config = config)
     internal val lungeStateMachine = LungeStateMachine(config = config)
     internal val calfRaiseStateMachine = CalfRaiseStateMachine(config = config)
+    internal val plankStateMachine = PlankStateMachine(config = config)
 
     internal val metricsEngine = MetricsEngine(config = config)
 
@@ -74,6 +81,7 @@ class ExerciseAnalyzer(
     internal val shoulderPressFormRuleEngine = ShoulderPressFormRuleEngine()
     internal val lungeFormRuleEngine = LungeFormRuleEngine()
     internal val calfRaiseFormRuleEngine = CalfRaiseFormRuleEngine()
+    internal val plankFormRuleEngine = PlankFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
     internal val squatOutputGate = SquatOutputGate(config = config)
@@ -108,6 +116,14 @@ class ExerciseAnalyzer(
     }
 
     /**
+     * Enables or disables temporary debug logging in PlankStateMachine.
+     */
+    fun setPlankDebugLogging(enabled: Boolean, logger: ((String) -> Unit)? = null) {
+        plankStateMachine.isDebugLoggingEnabled = enabled
+        plankStateMachine.debugLogger = logger
+    }
+
+    /**
      * Process an individual camera frame with timestamp.
      * Runs full pipeline: pose -> visibility -> state machine -> metrics -> form rules -> output gate.
      */
@@ -137,6 +153,7 @@ class ExerciseAnalyzer(
      */
     fun analyzePose(poseResult: PoseEstimationResult): FrameResult {
         val visResult = when {
+            isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
             isLunge -> lungeVisibilityGate.checkFrame(poseResult)
             isShoulderPress -> shoulderPressVisibilityGate.checkFrame(poseResult)
@@ -147,6 +164,7 @@ class ExerciseAnalyzer(
         val isVisible = visResult.status == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isPlank -> plankStateMachine.processFrame(poseResult, isVisible)
             isCalfRaise -> calfRaiseStateMachine.processFrame(poseResult, isVisible)
             isLunge -> lungeStateMachine.processFrame(poseResult, isVisible)
             isShoulderPress -> shoulderPressStateMachine.processFrame(poseResult, isVisible)
@@ -154,10 +172,10 @@ class ExerciseAnalyzer(
             isSquat -> squatStateMachine.processFrame(poseResult, isVisible)
             else -> stateMachine.processFrame(poseResult, isVisible)
         }
-        val metrics = if (isCalfRaise) {
-            calfRaiseStateMachine.getFrameMetrics(state, poseResult, isVisible)
-        } else {
-            metricsEngine.processFrame(state, poseResult, isVisible)
+        val metrics = when {
+            isPlank -> plankStateMachine.getFrameMetrics(state, isVisible)
+            isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, poseResult, isVisible)
+            else -> metricsEngine.processFrame(state, poseResult, isVisible)
         }
 
         // Non-side-view graceful degradation: scale confidence if in non-side view for lunge
@@ -168,6 +186,14 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isPlank -> {
+                plankFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    isVisibilitySufficient = isVisible,
+                    isWobbleRecovered = plankStateMachine.lastWobbleDetected
+                )
+            }
             isCalfRaise -> {
                 calfRaiseFormRuleEngine.processFrame(
                     exerciseState = state,
@@ -219,6 +245,27 @@ class ExerciseAnalyzer(
             }
         }
 
+        if (isPlank) {
+            if (visResult.status == VisibilityStatus.INSUFFICIENT_VISIBILITY) {
+                return FrameResult(
+                    status = ValidationStatus.INSUFFICIENT_VISIBILITY,
+                    confidence = 0.0f,
+                    currentReps = null,
+                    currentHoldSec = null,
+                    instantRomPercent = null,
+                    activeFeedback = null
+                )
+            }
+            return FrameResult(
+                status = ValidationStatus.VALID,
+                confidence = effectiveConfidence,
+                currentReps = null,
+                currentHoldSec = plankStateMachine.holdDurationSec,
+                instantRomPercent = metrics.instantRomPercent,
+                activeFeedback = form.newFeedbackEvents.firstOrNull()
+            )
+        }
+
         if (isSquat) {
             return squatOutputGate.assembleFrameResult(
                 visibilityStatus = visResult.status,
@@ -254,7 +301,7 @@ class ExerciseAnalyzer(
         heelY: Float? = null
     ): FrameResult {
         // Hard requirement for Calf Raise: non-side view fails visibility directly
-        val visStatus = if (!isVisibilitySufficient || (isCalfRaise && isSideViewOverride == false)) {
+        val visStatus = if (!isVisibilitySufficient || (isCalfRaise && isSideViewOverride == false) || (isPlank && isSideViewOverride == false)) {
             VisibilityStatus.INSUFFICIENT_VISIBILITY
         } else {
             VisibilityStatus.SUFFICIENT_VISIBILITY
@@ -262,6 +309,7 @@ class ExerciseAnalyzer(
         val isVisSufficient = visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isPlank -> plankStateMachine.processAngle(hipLineAngle, timestampMs, isVisSufficient)
             isCalfRaise -> {
                 val actualHeelY = heelY ?: if (elbowAngle > 1.0f) (elbowAngle / 100.0f) else elbowAngle
                 calfRaiseStateMachine.processHeelY(actualHeelY, timestampMs, isVisSufficient)
@@ -308,10 +356,10 @@ class ExerciseAnalyzer(
             hasPose = isVisSufficient
         )
 
-        val metrics = if (isCalfRaise) {
-            calfRaiseStateMachine.getFrameMetrics(state, mockPose, isVisSufficient)
-        } else {
-            metricsEngine.processFrame(state, mockPose, isVisSufficient)
+        val metrics = when {
+            isPlank -> plankStateMachine.getFrameMetrics(state, isVisSufficient)
+            isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, mockPose, isVisSufficient)
+            else -> metricsEngine.processFrame(state, mockPose, isVisSufficient)
         }
 
         // Non-side-view degradation check for synthetic test sequences
@@ -322,6 +370,16 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isPlank -> {
+                plankFormRuleEngine.evaluateFrame(
+                    hipLineAngle = hipLineAngle,
+                    isHoldInProgress = state.isRepInProgress,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    isVisibilitySufficient = isVisSufficient,
+                    isWobbleRecovered = plankStateMachine.lastWobbleDetected
+                )
+            }
             isCalfRaise -> {
                 calfRaiseFormRuleEngine.evaluateFrame(
                     elevation = state.currentElbowAngle,
@@ -406,6 +464,27 @@ class ExerciseAnalyzer(
             }
         }
 
+        if (isPlank) {
+            if (visStatus == VisibilityStatus.INSUFFICIENT_VISIBILITY) {
+                return FrameResult(
+                    status = ValidationStatus.INSUFFICIENT_VISIBILITY,
+                    confidence = 0.0f,
+                    currentReps = null,
+                    currentHoldSec = null,
+                    instantRomPercent = null,
+                    activeFeedback = null
+                )
+            }
+            return FrameResult(
+                status = ValidationStatus.VALID,
+                confidence = effectiveConfidence,
+                currentReps = null,
+                currentHoldSec = plankStateMachine.holdDurationSec,
+                instantRomPercent = metrics.instantRomPercent,
+                activeFeedback = form.newFeedbackEvents.firstOrNull()
+            )
+        }
+
         if (isSquat) {
             return squatOutputGate.assembleFrameResult(
                 visibilityStatus = visStatus,
@@ -430,6 +509,7 @@ class ExerciseAnalyzer(
      */
     fun checkVisibility(poseResult: PoseEstimationResult): FrameVisibilityResult {
         return when {
+            isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
             isLunge -> lungeVisibilityGate.checkFrame(poseResult)
             isShoulderPress -> shoulderPressVisibilityGate.checkFrame(poseResult)
@@ -446,6 +526,7 @@ class ExerciseAnalyzer(
      */
     fun getSessionResult(): SessionResult {
         val totalFrames = when {
+            isPlank -> plankVisibilityGate.totalFramesAnalyzed
             isCalfRaise -> calfRaiseVisibilityGate.totalFramesAnalyzed
             isLunge -> lungeVisibilityGate.totalFramesAnalyzed
             isShoulderPress -> shoulderPressVisibilityGate.totalFramesAnalyzed
@@ -455,6 +536,7 @@ class ExerciseAnalyzer(
         }
         val visStatus = if (totalFrames > 0L) {
             when {
+                isPlank -> plankVisibilityGate.getSessionVisibilityStatus()
                 isCalfRaise -> calfRaiseVisibilityGate.getSessionVisibilityStatus()
                 isLunge -> lungeVisibilityGate.getSessionVisibilityStatus()
                 isShoulderPress -> shoulderPressVisibilityGate.getSessionVisibilityStatus()
@@ -464,6 +546,24 @@ class ExerciseAnalyzer(
             }
         } else {
             VisibilityStatus.SUFFICIENT_VISIBILITY
+        }
+
+        if (isPlank) {
+            val status = if (visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY) ValidationStatus.VALID else ValidationStatus.INSUFFICIENT_VISIBILITY
+            val confidence = if (visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY) 1.0f else 0.0f
+            return outputGate.buildSessionResult(
+                status = status,
+                confidence = confidence,
+                completeReps = null,
+                incompleteReps = null,
+                holdDurationSec = plankStateMachine.holdDurationSec,
+                avgRepDurationSec = null,
+                romPercent = plankStateMachine.averageRomPercent,
+                tutFactor = plankStateMachine.tutFactor,
+                formFactor = plankFormRuleEngine.computeFormFactor(),
+                formErrors = plankFormRuleEngine.allSessionErrors,
+                feedbackEvents = plankFormRuleEngine.allFeedbackEvents
+            )
         }
 
         val currentState = when {
@@ -569,6 +669,11 @@ class ExerciseAnalyzer(
      */
     fun reset() {
         when {
+            isPlank -> {
+                plankVisibilityGate.reset()
+                plankStateMachine.reset()
+                plankFormRuleEngine.reset()
+            }
             isCalfRaise -> {
                 calfRaiseVisibilityGate.reset()
                 calfRaiseStateMachine.reset()

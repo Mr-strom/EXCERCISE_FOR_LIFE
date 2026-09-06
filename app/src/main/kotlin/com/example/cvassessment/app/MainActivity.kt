@@ -90,5 +90,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardPlank = findViewById<View>(R.id.cardPlank)
+        cardPlank.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "plank"
+            SessionDataHolder.selectedExerciseName = "Plank"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "plank")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Plank")
+            }
+            startActivity(intent)
+        }
     }
 }

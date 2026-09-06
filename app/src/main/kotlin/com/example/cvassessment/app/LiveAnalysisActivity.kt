@@ -28,6 +28,7 @@ import com.example.cvassessment.app.ui.TtsFeedbackController
 import com.example.cvassessment.sdk.ExerciseAnalyzer
 import com.example.cvassessment.sdk.ValidationStatus
 import com.example.cvassessment.sdk.pose.PoseEstimator
+import com.example.cvassessment.sdk.spec.ExerciseCategory
 import java.util.Locale
 
 /**
@@ -63,6 +64,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var poseOverlayView: PoseOverlayView
     private lateinit var tvExerciseName: TextView
     private lateinit var chipValidationStatus: TextView
+    private lateinit var tvRepLabel: TextView
     private lateinit var tvRepCounter: TextView
     private lateinit var tvCompletedRepMetrics: TextView
     private lateinit var bannerInsufficientVisibility: LinearLayout
@@ -110,6 +112,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         poseOverlayView = findViewById(R.id.livePoseOverlay)
         tvExerciseName = findViewById(R.id.tvLiveExerciseName)
         chipValidationStatus = findViewById(R.id.chipValidationStatus)
+        tvRepLabel = findViewById(R.id.tvRepLabel)
         tvRepCounter = findViewById(R.id.tvRepCounter)
         tvCompletedRepMetrics = findViewById(R.id.tvCompletedRepMetrics)
         bannerInsufficientVisibility = findViewById(R.id.bannerInsufficientVisibility)
@@ -284,25 +287,37 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 bannerInsufficientVisibility.visibility = View.GONE
             }
 
-            // 4. Rep Counter (large, clear) & Completed Rep Metrics (ROM / TuT / Form upon completion)
+            // 4. Rep Counter / Hold Timer & Metrics
             val isVisibilityInsufficient = (frameResult.status == ValidationStatus.INSUFFICIENT_VISIBILITY)
             val isVisibilityWarningActive = (isVisibilityInsufficient || guidanceResult.isWarning)
+            val isStaticHold = (analyzer.config.category == ExerciseCategory.STATIC_HOLD)
 
-            if (isVisibilityInsufficient) {
-                // Per R7 refusal rule: Do not force or display unreliable metrics
-                tvRepCounter.text = "--"
+            if (isStaticHold) {
+                tvRepLabel.text = "HOLD TIME"
+                if (isVisibilityInsufficient) {
+                    tvRepCounter.text = "--"
+                } else {
+                    val currentHoldSec = frameResult.currentHoldSec ?: 0.0f
+                    tvRepCounter.text = "${currentHoldSec.toInt()}s"
+                }
             } else {
-                val currentReps = frameResult.currentReps ?: 0
-                tvRepCounter.text = currentReps.toString()
+                tvRepLabel.text = "REPS"
+                if (isVisibilityInsufficient) {
+                    // Per R7 refusal rule: Do not force or display unreliable metrics
+                    tvRepCounter.text = "--"
+                } else {
+                    val currentReps = frameResult.currentReps ?: 0
+                    tvRepCounter.text = currentReps.toString()
 
-                // When a rep completes under valid visibility, update ROM/TuT/Form numbers
-                if (currentReps > lastCompletedRepCount && !isVisibilityWarningActive) {
-                    lastCompletedRepCount = currentReps
-                    val latestRep = analyzer.latestCompletedRepMetrics
-                    if (latestRep != null) {
-                        val formScore = analyzer.getRepFormScore(currentReps)
-                        val tutStr = String.format(Locale.US, "%.1f", latestRep.tutFactor)
-                        tvCompletedRepMetrics.text = "Rep $currentReps: ROM ${latestRep.romPercent.toInt()}% • TuT ${tutStr}x • Form $formScore%"
+                    // When a rep completes under valid visibility, update ROM/TuT/Form numbers
+                    if (currentReps > lastCompletedRepCount && !isVisibilityWarningActive) {
+                        lastCompletedRepCount = currentReps
+                        val latestRep = analyzer.latestCompletedRepMetrics
+                        if (latestRep != null) {
+                            val formScore = analyzer.getRepFormScore(currentReps)
+                            val tutStr = String.format(Locale.US, "%.1f", latestRep.tutFactor)
+                            tvCompletedRepMetrics.text = "Rep $currentReps: ROM ${latestRep.romPercent.toInt()}% • TuT ${tutStr}x • Form $formScore%"
+                        }
                     }
                 }
             }
@@ -310,7 +325,7 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // D13: Enforce R7 UI metric freezing: Hide completed rep metrics during active visibility failure or guidance warning
             if (isVisibilityWarningActive) {
                 tvCompletedRepMetrics.visibility = View.GONE
-            } else if (lastCompletedRepCount > 0 && tvCompletedRepMetrics.text.isNotEmpty()) {
+            } else if (!isStaticHold && lastCompletedRepCount > 0 && tvCompletedRepMetrics.text.isNotEmpty()) {
                 tvCompletedRepMetrics.visibility = View.VISIBLE
             }
 
