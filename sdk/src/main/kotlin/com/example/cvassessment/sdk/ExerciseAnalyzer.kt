@@ -2,6 +2,7 @@ package com.example.cvassessment.sdk
 
 import com.example.cvassessment.sdk.form.BicepCurlFormRuleEngine
 import com.example.cvassessment.sdk.form.FormRuleEngine
+import com.example.cvassessment.sdk.form.LungeFormRuleEngine
 import com.example.cvassessment.sdk.form.ShoulderPressFormRuleEngine
 import com.example.cvassessment.sdk.form.SquatFormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
@@ -15,10 +16,13 @@ import com.example.cvassessment.sdk.spec.ExerciseConfig
 import com.example.cvassessment.sdk.spec.ExerciseRegistry
 import com.example.cvassessment.sdk.statemachine.BicepCurlStateMachine
 import com.example.cvassessment.sdk.statemachine.ExerciseStateMachine
+import com.example.cvassessment.sdk.statemachine.LungeGeometry
+import com.example.cvassessment.sdk.statemachine.LungeStateMachine
 import com.example.cvassessment.sdk.statemachine.ShoulderPressStateMachine
 import com.example.cvassessment.sdk.statemachine.SquatStateMachine
 import com.example.cvassessment.sdk.visibility.BicepCurlVisibilityGate
 import com.example.cvassessment.sdk.visibility.FrameVisibilityResult
+import com.example.cvassessment.sdk.visibility.LungeVisibilityGate
 import com.example.cvassessment.sdk.visibility.ShoulderPressVisibilityGate
 import com.example.cvassessment.sdk.visibility.SquatVisibilityGate
 import com.example.cvassessment.sdk.visibility.VisibilityGate
@@ -40,17 +44,20 @@ class ExerciseAnalyzer(
     val isSquat: Boolean = exerciseId.trim().lowercase() == "squat"
     val isBicepCurl: Boolean = exerciseId.trim().lowercase() in listOf("bicep_curl", "bicepcurl")
     val isShoulderPress: Boolean = exerciseId.trim().lowercase() in listOf("shoulder_press", "shoulderpress")
+    val isLunge: Boolean = exerciseId.trim().lowercase() == "lunge"
 
     // Pipeline modules (enforced as internal to /sdk to maintain clean architectural boundary)
     internal val visibilityGate = VisibilityGate(exerciseId = exerciseId)
     internal val squatVisibilityGate = SquatVisibilityGate()
     internal val bicepCurlVisibilityGate = BicepCurlVisibilityGate()
     internal val shoulderPressVisibilityGate = ShoulderPressVisibilityGate()
+    internal val lungeVisibilityGate = LungeVisibilityGate()
 
     internal val stateMachine = ExerciseStateMachine(config = config)
     internal val squatStateMachine = SquatStateMachine(config = config)
     internal val bicepCurlStateMachine = BicepCurlStateMachine(config = config)
     internal val shoulderPressStateMachine = ShoulderPressStateMachine(config = config)
+    internal val lungeStateMachine = LungeStateMachine(config = config)
 
     internal val metricsEngine = MetricsEngine(config = config)
 
@@ -58,6 +65,7 @@ class ExerciseAnalyzer(
     internal val squatFormRuleEngine = SquatFormRuleEngine()
     internal val bicepCurlFormRuleEngine = BicepCurlFormRuleEngine()
     internal val shoulderPressFormRuleEngine = ShoulderPressFormRuleEngine()
+    internal val lungeFormRuleEngine = LungeFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
     internal val squatOutputGate = SquatOutputGate(config = config)
@@ -103,6 +111,7 @@ class ExerciseAnalyzer(
      */
     fun analyzePose(poseResult: PoseEstimationResult): FrameResult {
         val visResult = when {
+            isLunge -> lungeVisibilityGate.checkFrame(poseResult)
             isShoulderPress -> shoulderPressVisibilityGate.checkFrame(poseResult)
             isBicepCurl -> bicepCurlVisibilityGate.checkFrame(poseResult)
             isSquat -> squatVisibilityGate.checkFrame(poseResult)
@@ -111,13 +120,31 @@ class ExerciseAnalyzer(
         val isVisible = visResult.status == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isLunge -> lungeStateMachine.processFrame(poseResult, isVisible)
             isShoulderPress -> shoulderPressStateMachine.processFrame(poseResult, isVisible)
             isBicepCurl -> bicepCurlStateMachine.processFrame(poseResult, isVisible)
             isSquat -> squatStateMachine.processFrame(poseResult, isVisible)
             else -> stateMachine.processFrame(poseResult, isVisible)
         }
         val metrics = metricsEngine.processFrame(state, poseResult, isVisible)
+
+        // Non-side-view graceful degradation: scale confidence if in non-side view for lunge
+        val effectiveConfidence = if (isLunge && !LungeGeometry.isSideView(poseResult.landmarks)) {
+            metrics.confidence * 0.75f
+        } else {
+            metrics.confidence
+        }
+
         val form = when {
+            isLunge -> {
+                lungeFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisible,
+                    frontLeg = lungeStateMachine.activeFrontLeg
+                )
+            }
             isShoulderPress -> {
                 shoulderPressFormRuleEngine.processFrame(
                     exerciseState = state,
@@ -155,7 +182,7 @@ class ExerciseAnalyzer(
         if (isSquat) {
             return squatOutputGate.assembleFrameResult(
                 visibilityStatus = visResult.status,
-                frameConfidence = metrics.confidence,
+                frameConfidence = effectiveConfidence,
                 exerciseState = state,
                 frameMetrics = metrics,
                 formOutput = form
@@ -163,7 +190,7 @@ class ExerciseAnalyzer(
         } else {
             return outputGate.assembleFrameResult(
                 visibilityStatus = visResult.status,
-                frameConfidence = metrics.confidence,
+                frameConfidence = effectiveConfidence,
                 exerciseState = state,
                 frameMetrics = metrics,
                 formOutput = form
@@ -181,7 +208,9 @@ class ExerciseAnalyzer(
         timestampMs: Long,
         confidence: Float = 1.0f,
         isVisibilitySufficient: Boolean = true,
-        rightElbowAngle: Float? = null
+        rightElbowAngle: Float? = null,
+        frontLeg: LungeGeometry.LegSide = LungeGeometry.LegSide.LEFT,
+        isSideViewOverride: Boolean? = null
     ): FrameResult {
         val visStatus = if (isVisibilitySufficient) {
             VisibilityStatus.SUFFICIENT_VISIBILITY
@@ -190,6 +219,15 @@ class ExerciseAnalyzer(
         }
 
         val state = when {
+            isLunge -> {
+                lungeStateMachine.processAngles(
+                    frontKneeAngle = elbowAngle,
+                    torsoAngle = hipLineAngle,
+                    timestampMs = timestampMs,
+                    isVisibilitySufficient = isVisibilitySufficient,
+                    frontLeg = frontLeg
+                )
+            }
             isShoulderPress -> {
                 shoulderPressStateMachine.processAngles(
                     leftAngle = elbowAngle,
@@ -224,7 +262,29 @@ class ExerciseAnalyzer(
         )
 
         val metrics = metricsEngine.processFrame(state, mockPose, isVisibilitySufficient)
+
+        // Non-side-view degradation check for synthetic test sequences
+        val effectiveConfidence = if (isLunge && isSideViewOverride == false) {
+            confidence * 0.75f
+        } else {
+            confidence
+        }
+
         val form = when {
+            isLunge -> {
+                lungeFormRuleEngine.evaluateFrame(
+                    frontKneeAngle = elbowAngle,
+                    torsoAngle = hipLineAngle,
+                    phase = state.phase,
+                    isRepInProgress = state.isRepInProgress,
+                    currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
+                    timestampMs = timestampMs,
+                    confidence = effectiveConfidence,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    frontLeg = frontLeg,
+                    isVisibilitySufficient = isVisibilitySufficient
+                )
+            }
             isShoulderPress -> {
                 shoulderPressFormRuleEngine.evaluateFrame(
                     leftElbowAngle = elbowAngle,
@@ -286,7 +346,7 @@ class ExerciseAnalyzer(
         if (isSquat) {
             return squatOutputGate.assembleFrameResult(
                 visibilityStatus = visStatus,
-                frameConfidence = confidence,
+                frameConfidence = effectiveConfidence,
                 exerciseState = state,
                 frameMetrics = metrics,
                 formOutput = form
@@ -294,7 +354,7 @@ class ExerciseAnalyzer(
         } else {
             return outputGate.assembleFrameResult(
                 visibilityStatus = visStatus,
-                frameConfidence = confidence,
+                frameConfidence = effectiveConfidence,
                 exerciseState = state,
                 frameMetrics = metrics,
                 formOutput = form
@@ -307,6 +367,7 @@ class ExerciseAnalyzer(
      */
     fun checkVisibility(poseResult: PoseEstimationResult): FrameVisibilityResult {
         return when {
+            isLunge -> lungeVisibilityGate.checkFrame(poseResult)
             isShoulderPress -> shoulderPressVisibilityGate.checkFrame(poseResult)
             isBicepCurl -> bicepCurlVisibilityGate.checkFrame(poseResult)
             isSquat -> squatVisibilityGate.checkFrame(poseResult)
@@ -321,6 +382,7 @@ class ExerciseAnalyzer(
      */
     fun getSessionResult(): SessionResult {
         val totalFrames = when {
+            isLunge -> lungeVisibilityGate.totalFramesAnalyzed
             isShoulderPress -> shoulderPressVisibilityGate.totalFramesAnalyzed
             isBicepCurl -> bicepCurlVisibilityGate.totalFramesAnalyzed
             isSquat -> squatVisibilityGate.totalFramesAnalyzed
@@ -328,6 +390,7 @@ class ExerciseAnalyzer(
         }
         val visStatus = if (totalFrames > 0L) {
             when {
+                isLunge -> lungeVisibilityGate.getSessionVisibilityStatus()
                 isShoulderPress -> shoulderPressVisibilityGate.getSessionVisibilityStatus()
                 isBicepCurl -> bicepCurlVisibilityGate.getSessionVisibilityStatus()
                 isSquat -> squatVisibilityGate.getSessionVisibilityStatus()
@@ -338,24 +401,28 @@ class ExerciseAnalyzer(
         }
 
         val currentState = when {
+            isLunge -> lungeStateMachine.currentState
             isShoulderPress -> shoulderPressStateMachine.currentState
             isBicepCurl -> bicepCurlStateMachine.currentState
             isSquat -> squatStateMachine.currentState
             else -> stateMachine.currentState
         }
         val completeReps = when {
+            isLunge -> lungeStateMachine.completeReps
             isShoulderPress -> shoulderPressStateMachine.completeReps
             isBicepCurl -> bicepCurlStateMachine.completeReps
             isSquat -> squatStateMachine.completeReps
             else -> stateMachine.completeReps
         }
         val sessionErrors = when {
+            isLunge -> lungeFormRuleEngine.allSessionErrors
             isShoulderPress -> shoulderPressFormRuleEngine.allSessionErrors
             isBicepCurl -> bicepCurlFormRuleEngine.allSessionErrors
             isSquat -> squatFormRuleEngine.allSessionErrors
             else -> formRuleEngine.allSessionErrors
         }
         val feedbackEvents = when {
+            isLunge -> lungeFormRuleEngine.allFeedbackEvents
             isShoulderPress -> shoulderPressFormRuleEngine.allFeedbackEvents
             isBicepCurl -> bicepCurlFormRuleEngine.allFeedbackEvents
             isSquat -> squatFormRuleEngine.allFeedbackEvents
@@ -410,6 +477,7 @@ class ExerciseAnalyzer(
      */
     fun getRepFormScore(repIndex: Int): Int {
         val sessionErrors = when {
+            isLunge -> lungeFormRuleEngine.allSessionErrors
             isShoulderPress -> shoulderPressFormRuleEngine.allSessionErrors
             isBicepCurl -> bicepCurlFormRuleEngine.allSessionErrors
             isSquat -> squatFormRuleEngine.allSessionErrors
@@ -427,6 +495,11 @@ class ExerciseAnalyzer(
      */
     fun reset() {
         when {
+            isLunge -> {
+                lungeVisibilityGate.reset()
+                lungeStateMachine.reset()
+                lungeFormRuleEngine.reset()
+            }
             isShoulderPress -> {
                 shoulderPressVisibilityGate.reset()
                 shoulderPressStateMachine.reset()

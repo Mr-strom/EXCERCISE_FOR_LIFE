@@ -315,6 +315,83 @@ data class ExerciseConfig(
         )
 
         /**
+         * Canonical Lunge specification from EXERCISE_SPEC.md.
+         *
+         * - category: dynamic_rep
+         * - primaryLandmarks: [hips, knees, ankles] (both legs)
+         * - trackedAngles: [front_knee_angle, back_knee_angle, torso_vertical_angle]
+         * - phases: top (both knee_angles > 160°) -> bottom (front_knee_angle ~90°) -> top
+         * - romDefinition: front_knee_angle range; 100% = reaching <= 90°
+         * - tutBaseline: 2.0s down + 2.0s up = 4.0s/rep
+         * - cameraNotes: "side view strongly preferred — front view struggles to separate front/back leg angles"
+         */
+        val LUNGE = ExerciseConfig(
+            exerciseId = "lunge",
+            name = "Lunge",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("hips", "knees", "ankles"),
+            trackedAngles = listOf("front_knee_angle", "back_knee_angle", "torso_vertical_angle"),
+            phases = mapOf(
+                "top" to PhaseCondition(
+                    phaseName = "top",
+                    trackedAngleName = "front_knee_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 160.0f,
+                    toleranceDeg = 10.0f
+                ),
+                "bottom" to PhaseCondition(
+                    phaseName = "bottom",
+                    trackedAngleName = "front_knee_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 90.0f,
+                    toleranceDeg = 15.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "front_knee_angle",
+                fullExpectedAngle = 90.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 160.0f,
+                description = "front_knee_angle range; 100% = front knee reaching ~90 deg, back knee lowering toward floor"
+            ),
+            tutBaseline = 4.0f,
+            cameraNotes = "side view strongly preferred — front view struggles to separate front/back leg angles",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "front_knee_angle",
+                    firstJoint = PoseLandmarkType.LEFT_HIP,
+                    vertexJoint = PoseLandmarkType.LEFT_KNEE,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Front knee angle (hip-knee-ankle) for lunge depth tracking"
+                ),
+                JointAngleDefinition(
+                    angleName = "back_knee_angle",
+                    firstJoint = PoseLandmarkType.RIGHT_HIP,
+                    vertexJoint = PoseLandmarkType.RIGHT_KNEE,
+                    lastJoint = PoseLandmarkType.RIGHT_ANKLE,
+                    description = "Back knee angle (hip-knee-ankle) for back leg extension/drop"
+                ),
+                JointAngleDefinition(
+                    angleName = "torso_vertical_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_KNEE,
+                    description = "Torso vertical angle for upper-body posture stability"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_KNEE,      // 25
+                PoseLandmarkType.RIGHT_KNEE,     // 26
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE      // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

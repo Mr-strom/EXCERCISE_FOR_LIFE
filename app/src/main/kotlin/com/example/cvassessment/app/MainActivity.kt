@@ -66,5 +66,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardLunge = findViewById<View>(R.id.cardLunge)
+        cardLunge.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "lunge"
+            SessionDataHolder.selectedExerciseName = "Lunge"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "lunge")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Lunge")
+            }
+            startActivity(intent)
+        }
     }
 }
