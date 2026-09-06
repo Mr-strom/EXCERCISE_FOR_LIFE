@@ -593,6 +593,71 @@ class SquatAssessmentTest {
         assertEquals(0.50f, repScore!!, 0.001f)
     }
 
+    /**
+     * Unit Test 14 (Regression for D12): Natural bottom-hold pause (0.5-1.0s) with landmark tracking jitter
+     * must NOT trigger false incomplete rep detections or mid-rep duration resets.
+     */
+    @Test
+    fun testUnit14_NaturalBottomPauseDoesNotTriggerIncompleteRep() {
+        val stateMachine = SquatStateMachine()
+        var timeMs = 1000L
+
+        // Initial setup at TOP lockout (> 160°)
+        stateMachine.processAngle(kneeAngle = 165.0f, hipAngle = 180.0f, timestampMs = timeMs)
+        assertEquals(ExercisePhase.TOP, stateMachine.currentPhase)
+
+        // Rep 1: Descent starts at t=1300ms
+        timeMs = 1300L
+        stateMachine.processAngle(150.0f, 180.0f, timeMs)
+        assertEquals(ExercisePhase.DESCENDING, stateMachine.currentPhase)
+
+        timeMs = 1600L
+        stateMachine.processAngle(130.0f, 180.0f, timeMs)
+
+        // Reaches parallel depth at t=1900ms (113.0° <= 115.0° target depth)
+        timeMs = 1900L
+        val bottomEnter = stateMachine.processAngle(113.0f, 180.0f, timeMs)
+        assertEquals(ExercisePhase.BOTTOM, bottomEnter.phase)
+
+        // Natural 800ms bottom-hold pause (t=1900ms to t=2700ms) with ±4° to 8° BlazePose tracking noise
+        timeMs = 2100L
+        stateMachine.processAngle(114.5f, 180.0f, timeMs)
+        assertEquals("Should stay in BOTTOM during slight wobble", ExercisePhase.BOTTOM, stateMachine.currentPhase)
+
+        timeMs = 2300L
+        stateMachine.processAngle(119.5f, 180.0f, timeMs) // Jitter spike of +6.5°
+
+        timeMs = 2500L
+        stateMachine.processAngle(108.0f, 180.0f, timeMs) // Sinks deeper / jitter stabilizes
+
+        timeMs = 2700L
+        stateMachine.processAngle(112.0f, 180.0f, timeMs) // Pause concludes
+
+        // User ascends out of bottom hole: 112° -> 132° -> 150° -> 165°
+        timeMs = 3000L
+        val ascState = stateMachine.processAngle(132.0f, 180.0f, timeMs)
+        assertEquals(ExercisePhase.ASCENDING, ascState.phase)
+
+        timeMs = 3300L
+        stateMachine.processAngle(150.0f, 180.0f, timeMs)
+
+        timeMs = 3600L
+        val finishState = stateMachine.processAngle(165.0f, 180.0f, timeMs)
+
+        // Verifications: Exactly 1 clean rep completed, 0 incomplete reps
+        assertEquals(ExercisePhase.TOP, finishState.phase)
+        assertEquals("Must complete exactly 1 rep", 1, finishState.completeRepCount)
+        assertEquals("Must NOT trigger any incomplete reps during natural pause", 0, finishState.incompleteRepCount)
+        assertNotNull("Must emit newlyCompletedRep", finishState.newlyCompletedRep)
+
+        val rep = finishState.completeReps.first()
+        assertEquals(1, rep.repIndex)
+        // Duration should be measured from t=1300ms descent start to t=3600ms top lockout = 2300ms
+        assertEquals(2300L, rep.durationMs)
+        assertEquals(108.0f, rep.minElbowAngle, 0.01f)
+        assertTrue(rep.isComplete)
+    }
+
     private fun createSyntheticSquatLandmarks(
         leftHipX: Float, rightHipX: Float,
         leftKneeX: Float, rightKneeX: Float,

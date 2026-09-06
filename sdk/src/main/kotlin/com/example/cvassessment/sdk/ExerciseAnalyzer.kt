@@ -59,6 +59,14 @@ class ExerciseAnalyzer(
     var poseEstimator: PoseEstimator? = null
 
     /**
+     * Enables or disables temporary debug logging in SquatStateMachine.
+     */
+    fun setSquatDebugLogging(enabled: Boolean, logger: ((String) -> Unit)? = null) {
+        squatStateMachine.isDebugLoggingEnabled = enabled
+        squatStateMachine.debugLogger = logger
+    }
+
+    /**
      * Process an individual camera frame with timestamp.
      * Runs full pipeline: pose -> visibility -> state machine -> metrics -> form rules -> output gate.
      */

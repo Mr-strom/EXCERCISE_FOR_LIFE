@@ -196,6 +196,13 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }, 1000L)
         }
 
+        // Enable debug logging for Squat if active
+        if (exerciseId == "squat") {
+            analyzer.setSquatDebugLogging(true) { msg ->
+                Log.d("SquatStateMachine", msg)
+            }
+        }
+
         // Start live camera stream
         cameraCapturePipeline.startCamera(this, previewView)
     }
@@ -215,6 +222,11 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // 3. Feed into full SDK analysis pipeline
         val frameResult = analyzer.analyzePose(poseResult)
+
+        if (exerciseId == "squat") {
+            val kneeAngle = com.example.cvassessment.sdk.statemachine.SquatGeometry.computeKneeAngle(poseResult.landmarks)
+            Log.d(TAG, "SQUAT_LIVE: t=${timestampMs}ms | knee=${"%.1f".format(kneeAngle)}° | status=${frameResult.status} | reps=${frameResult.currentReps}")
+        }
 
         val isFront = (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT)
 

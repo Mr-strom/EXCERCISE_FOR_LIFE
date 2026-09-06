@@ -133,7 +133,7 @@ data class ExerciseConfig(
                     phaseName = "bottom",
                     trackedAngleName = "knee_angle",
                     comparison = AngleComparison.LESS_THAN,
-                    thresholdAngle = 100.0f,
+                    thresholdAngle = 105.0f,
                     toleranceDeg = 10.0f
                 )
             ),
