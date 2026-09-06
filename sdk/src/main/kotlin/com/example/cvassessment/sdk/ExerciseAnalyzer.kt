@@ -6,6 +6,7 @@ import com.example.cvassessment.sdk.form.FormRuleEngine
 import com.example.cvassessment.sdk.form.LungeFormRuleEngine
 import com.example.cvassessment.sdk.form.PlankFormRuleEngine
 import com.example.cvassessment.sdk.form.ShoulderPressFormRuleEngine
+import com.example.cvassessment.sdk.form.SidePlankFormRuleEngine
 import com.example.cvassessment.sdk.form.SquatFormRuleEngine
 import com.example.cvassessment.sdk.metrics.MetricsEngine
 import com.example.cvassessment.sdk.metrics.RepMetrics
@@ -25,6 +26,8 @@ import com.example.cvassessment.sdk.statemachine.LungeStateMachine
 import com.example.cvassessment.sdk.statemachine.PlankGeometry
 import com.example.cvassessment.sdk.statemachine.PlankStateMachine
 import com.example.cvassessment.sdk.statemachine.ShoulderPressStateMachine
+import com.example.cvassessment.sdk.statemachine.SidePlankGeometry
+import com.example.cvassessment.sdk.statemachine.SidePlankStateMachine
 import com.example.cvassessment.sdk.statemachine.SquatStateMachine
 import com.example.cvassessment.sdk.visibility.BicepCurlVisibilityGate
 import com.example.cvassessment.sdk.visibility.CalfRaiseVisibilityGate
@@ -32,6 +35,7 @@ import com.example.cvassessment.sdk.visibility.FrameVisibilityResult
 import com.example.cvassessment.sdk.visibility.LungeVisibilityGate
 import com.example.cvassessment.sdk.visibility.PlankVisibilityGate
 import com.example.cvassessment.sdk.visibility.ShoulderPressVisibilityGate
+import com.example.cvassessment.sdk.visibility.SidePlankVisibilityGate
 import com.example.cvassessment.sdk.visibility.SquatVisibilityGate
 import com.example.cvassessment.sdk.visibility.VisibilityGate
 import com.example.cvassessment.sdk.visibility.VisibilityStatus
@@ -55,6 +59,7 @@ class ExerciseAnalyzer(
     val isLunge: Boolean = exerciseId.trim().lowercase() == "lunge"
     val isCalfRaise: Boolean = exerciseId.trim().lowercase() in listOf("calf_raise", "calfraise")
     val isPlank: Boolean = exerciseId.trim().lowercase() == "plank"
+    val isSidePlank: Boolean = exerciseId.trim().lowercase() in listOf("side_plank", "sideplank")
 
     // Pipeline modules (enforced as internal to /sdk to maintain clean architectural boundary)
     internal val visibilityGate = VisibilityGate(exerciseId = exerciseId)
@@ -64,6 +69,7 @@ class ExerciseAnalyzer(
     internal val lungeVisibilityGate = LungeVisibilityGate()
     internal val calfRaiseVisibilityGate = CalfRaiseVisibilityGate()
     internal val plankVisibilityGate = PlankVisibilityGate()
+    internal val sidePlankVisibilityGate = SidePlankVisibilityGate()
 
     internal val stateMachine = ExerciseStateMachine(config = config)
     internal val squatStateMachine = SquatStateMachine(config = config)
@@ -72,6 +78,7 @@ class ExerciseAnalyzer(
     internal val lungeStateMachine = LungeStateMachine(config = config)
     internal val calfRaiseStateMachine = CalfRaiseStateMachine(config = config)
     internal val plankStateMachine = PlankStateMachine(config = config)
+    internal val sidePlankStateMachine = SidePlankStateMachine(config = config)
 
     internal val metricsEngine = MetricsEngine(config = config)
 
@@ -82,6 +89,7 @@ class ExerciseAnalyzer(
     internal val lungeFormRuleEngine = LungeFormRuleEngine()
     internal val calfRaiseFormRuleEngine = CalfRaiseFormRuleEngine()
     internal val plankFormRuleEngine = PlankFormRuleEngine()
+    internal val sidePlankFormRuleEngine = SidePlankFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
     internal val squatOutputGate = SquatOutputGate(config = config)
@@ -124,6 +132,14 @@ class ExerciseAnalyzer(
     }
 
     /**
+     * Enables or disables temporary debug logging in SidePlankStateMachine.
+     */
+    fun setSidePlankDebugLogging(enabled: Boolean, logger: ((String) -> Unit)? = null) {
+        sidePlankStateMachine.isDebugLoggingEnabled = enabled
+        sidePlankStateMachine.debugLogger = logger
+    }
+
+    /**
      * Process an individual camera frame with timestamp.
      * Runs full pipeline: pose -> visibility -> state machine -> metrics -> form rules -> output gate.
      */
@@ -153,6 +169,7 @@ class ExerciseAnalyzer(
      */
     fun analyzePose(poseResult: PoseEstimationResult): FrameResult {
         val visResult = when {
+            isSidePlank -> sidePlankVisibilityGate.checkFrame(poseResult, sidePlankStateMachine.supportSide)
             isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
             isLunge -> lungeVisibilityGate.checkFrame(poseResult)
@@ -164,6 +181,7 @@ class ExerciseAnalyzer(
         val isVisible = visResult.status == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isSidePlank -> sidePlankStateMachine.processFrame(poseResult, isVisible)
             isPlank -> plankStateMachine.processFrame(poseResult, isVisible)
             isCalfRaise -> calfRaiseStateMachine.processFrame(poseResult, isVisible)
             isLunge -> lungeStateMachine.processFrame(poseResult, isVisible)
@@ -173,6 +191,7 @@ class ExerciseAnalyzer(
             else -> stateMachine.processFrame(poseResult, isVisible)
         }
         val metrics = when {
+            isSidePlank -> sidePlankStateMachine.getFrameMetrics(state, isVisible)
             isPlank -> plankStateMachine.getFrameMetrics(state, isVisible)
             isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, poseResult, isVisible)
             else -> metricsEngine.processFrame(state, poseResult, isVisible)
@@ -186,6 +205,15 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isSidePlank -> {
+                sidePlankFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    isVisibilitySufficient = isVisible,
+                    supportSide = sidePlankStateMachine.supportSide,
+                    isWobbleRecovered = sidePlankStateMachine.lastWobbleDetected
+                )
+            }
             isPlank -> {
                 plankFormRuleEngine.processFrame(
                     exerciseState = state,
@@ -245,7 +273,8 @@ class ExerciseAnalyzer(
             }
         }
 
-        if (isPlank) {
+        if (isPlank || isSidePlank) {
+            val holdDuration = if (isPlank) plankStateMachine.holdDurationSec else sidePlankStateMachine.holdDurationSec
             if (visResult.status == VisibilityStatus.INSUFFICIENT_VISIBILITY) {
                 return FrameResult(
                     status = ValidationStatus.INSUFFICIENT_VISIBILITY,
@@ -260,7 +289,7 @@ class ExerciseAnalyzer(
                 status = ValidationStatus.VALID,
                 confidence = effectiveConfidence,
                 currentReps = null,
-                currentHoldSec = plankStateMachine.holdDurationSec,
+                currentHoldSec = holdDuration,
                 instantRomPercent = metrics.instantRomPercent,
                 activeFeedback = form.newFeedbackEvents.firstOrNull()
             )
@@ -309,6 +338,7 @@ class ExerciseAnalyzer(
         val isVisSufficient = visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isSidePlank -> sidePlankStateMachine.processAngle(hipLineAngle, timestampMs, isVisSufficient)
             isPlank -> plankStateMachine.processAngle(hipLineAngle, timestampMs, isVisSufficient)
             isCalfRaise -> {
                 val actualHeelY = heelY ?: if (elbowAngle > 1.0f) (elbowAngle / 100.0f) else elbowAngle
@@ -357,6 +387,7 @@ class ExerciseAnalyzer(
         )
 
         val metrics = when {
+            isSidePlank -> sidePlankStateMachine.getFrameMetrics(state, isVisSufficient)
             isPlank -> plankStateMachine.getFrameMetrics(state, isVisSufficient)
             isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, mockPose, isVisSufficient)
             else -> metricsEngine.processFrame(state, mockPose, isVisSufficient)
@@ -370,6 +401,16 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isSidePlank -> {
+                sidePlankFormRuleEngine.evaluateFrame(
+                    bodyLineAngle = hipLineAngle,
+                    isHoldInProgress = state.isRepInProgress,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    isVisibilitySufficient = isVisSufficient,
+                    isWobbleRecovered = sidePlankStateMachine.lastWobbleDetected
+                )
+            }
             isPlank -> {
                 plankFormRuleEngine.evaluateFrame(
                     hipLineAngle = hipLineAngle,
@@ -464,7 +505,8 @@ class ExerciseAnalyzer(
             }
         }
 
-        if (isPlank) {
+        if (isPlank || isSidePlank) {
+            val holdDuration = if (isPlank) plankStateMachine.holdDurationSec else sidePlankStateMachine.holdDurationSec
             if (visStatus == VisibilityStatus.INSUFFICIENT_VISIBILITY) {
                 return FrameResult(
                     status = ValidationStatus.INSUFFICIENT_VISIBILITY,
@@ -479,7 +521,7 @@ class ExerciseAnalyzer(
                 status = ValidationStatus.VALID,
                 confidence = effectiveConfidence,
                 currentReps = null,
-                currentHoldSec = plankStateMachine.holdDurationSec,
+                currentHoldSec = holdDuration,
                 instantRomPercent = metrics.instantRomPercent,
                 activeFeedback = form.newFeedbackEvents.firstOrNull()
             )
@@ -509,6 +551,7 @@ class ExerciseAnalyzer(
      */
     fun checkVisibility(poseResult: PoseEstimationResult): FrameVisibilityResult {
         return when {
+            isSidePlank -> sidePlankVisibilityGate.checkFrame(poseResult, sidePlankStateMachine.supportSide)
             isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
             isLunge -> lungeVisibilityGate.checkFrame(poseResult)
@@ -526,6 +569,7 @@ class ExerciseAnalyzer(
      */
     fun getSessionResult(): SessionResult {
         val totalFrames = when {
+            isSidePlank -> sidePlankVisibilityGate.totalFramesAnalyzed
             isPlank -> plankVisibilityGate.totalFramesAnalyzed
             isCalfRaise -> calfRaiseVisibilityGate.totalFramesAnalyzed
             isLunge -> lungeVisibilityGate.totalFramesAnalyzed
@@ -536,6 +580,7 @@ class ExerciseAnalyzer(
         }
         val visStatus = if (totalFrames > 0L) {
             when {
+                isSidePlank -> sidePlankVisibilityGate.getSessionVisibilityStatus()
                 isPlank -> plankVisibilityGate.getSessionVisibilityStatus()
                 isCalfRaise -> calfRaiseVisibilityGate.getSessionVisibilityStatus()
                 isLunge -> lungeVisibilityGate.getSessionVisibilityStatus()
@@ -563,6 +608,24 @@ class ExerciseAnalyzer(
                 formFactor = plankFormRuleEngine.computeFormFactor(),
                 formErrors = plankFormRuleEngine.allSessionErrors,
                 feedbackEvents = plankFormRuleEngine.allFeedbackEvents
+            )
+        }
+
+        if (isSidePlank) {
+            val status = if (visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY) ValidationStatus.VALID else ValidationStatus.INSUFFICIENT_VISIBILITY
+            val confidence = if (visStatus == VisibilityStatus.SUFFICIENT_VISIBILITY) 1.0f else 0.0f
+            return outputGate.buildSessionResult(
+                status = status,
+                confidence = confidence,
+                completeReps = null,
+                incompleteReps = null,
+                holdDurationSec = sidePlankStateMachine.holdDurationSec,
+                avgRepDurationSec = null,
+                romPercent = sidePlankStateMachine.averageRomPercent,
+                tutFactor = sidePlankStateMachine.tutFactor,
+                formFactor = sidePlankFormRuleEngine.computeFormFactor(),
+                formErrors = sidePlankFormRuleEngine.allSessionErrors,
+                feedbackEvents = sidePlankFormRuleEngine.allFeedbackEvents
             )
         }
 
@@ -669,6 +732,11 @@ class ExerciseAnalyzer(
      */
     fun reset() {
         when {
+            isSidePlank -> {
+                sidePlankVisibilityGate.reset()
+                sidePlankStateMachine.reset()
+                sidePlankFormRuleEngine.reset()
+            }
             isPlank -> {
                 plankVisibilityGate.reset()
                 plankStateMachine.reset()

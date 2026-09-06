@@ -523,6 +523,75 @@ data class ExerciseConfig(
         )
 
         /**
+         * Side Plank specification per EXERCISE_SPEC.md #8 and METRICS_SPEC.md §2, §4, §5:
+         * - category: static_hold
+         * - primaryLandmarks: [shoulders, hips, ankles, elbow] (support-side elbow)
+         * - trackedAngles: [body_line_angle] (shoulder-hip-ankle in lateral plane)
+         * - phases: hold_start -> holding -> hold_end
+         * - romDefinition: postural deviation from straight lateral line; 180° = 100%, deviation reduces %
+         * - tutBaseline: 30.0s (reference hold duration)
+         * - cameraNotes: "front view required (camera facing the side of the body being planked)"
+         */
+        val SIDE_PLANK = ExerciseConfig(
+            exerciseId = "side_plank",
+            name = "Side Plank",
+            category = ExerciseCategory.STATIC_HOLD,
+            primaryLandmarks = listOf("shoulders", "hips", "ankles", "elbow"),
+            trackedAngles = listOf("body_line_angle"),
+            phases = mapOf(
+                "hold_start" to PhaseCondition(
+                    phaseName = "hold_start",
+                    trackedAngleName = "body_line_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 180.0f,
+                    toleranceDeg = 15.0f
+                ),
+                "holding" to PhaseCondition(
+                    phaseName = "holding",
+                    trackedAngleName = "body_line_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 180.0f,
+                    toleranceDeg = 15.0f
+                ),
+                "hold_end" to PhaseCondition(
+                    phaseName = "hold_end",
+                    trackedAngleName = "body_line_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 165.0f,
+                    toleranceDeg = 0.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "body_line_angle",
+                fullExpectedAngle = 180.0f,
+                minimumAcceptablePercent = 70.0f,
+                startingAngle = 180.0f,
+                description = "postural deviation from straight lateral line; 180° = 100%, deviation reduces %"
+            ),
+            tutBaseline = 30.0f,
+            cameraNotes = "front view required (camera facing the side of the body being planked)",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "body_line_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Lateral body line angle formed by shoulder, hip, and ankle"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_ELBOW,     // 13
+                PoseLandmarkType.RIGHT_ELBOW,    // 14
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE     // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

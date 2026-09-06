@@ -102,5 +102,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardSidePlank = findViewById<View>(R.id.cardSidePlank)
+        cardSidePlank.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "side_plank"
+            SessionDataHolder.selectedExerciseName = "Side Plank"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "side_plank")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Side Plank")
+            }
+            startActivity(intent)
+        }
     }
 }
