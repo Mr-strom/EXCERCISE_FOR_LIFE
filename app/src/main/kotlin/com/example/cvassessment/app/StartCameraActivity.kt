@@ -50,7 +50,7 @@ class StartCameraActivity : AppCompatActivity() {
 
     private lateinit var cameraCapturePipeline: CameraCapturePipeline
     private lateinit var poseEstimator: PoseEstimator
-    private val setupAnalysisEvaluator = SetupAnalysisEvaluator()
+    private lateinit var setupAnalysisEvaluator: SetupAnalysisEvaluator
 
     private lateinit var previewView: PreviewView
     private lateinit var stickmanView: StickmanIndicatorView
@@ -139,6 +139,9 @@ class StartCameraActivity : AppCompatActivity() {
         // Initialize PoseEstimator
         poseEstimator = PoseEstimator(this, MODEL_ASSET)
 
+        // Initialize SetupAnalysisEvaluator for selected exercise
+        setupAnalysisEvaluator = SetupAnalysisEvaluator(exerciseId)
+
         // Initialize CameraCapturePipeline with FRONT camera as default (requirement 1)
         cameraCapturePipeline = CameraCapturePipeline(this)
         cameraCapturePipeline.currentLensFacing = CameraSelector.LENS_FACING_FRONT
@@ -225,6 +228,7 @@ class StartCameraActivity : AppCompatActivity() {
         ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
         val torsoScore = listOfNotNull(
+            landmarkMap[PoseLandmarkType.NOSE]?.visibility,
             landmarkMap[PoseLandmarkType.LEFT_SHOULDER]?.visibility,
             landmarkMap[PoseLandmarkType.RIGHT_SHOULDER]?.visibility,
             landmarkMap[PoseLandmarkType.LEFT_HIP]?.visibility,
@@ -233,11 +237,13 @@ class StartCameraActivity : AppCompatActivity() {
 
         val leftLegScore = listOfNotNull(
             landmarkMap[PoseLandmarkType.LEFT_HIP]?.visibility,
+            landmarkMap[PoseLandmarkType.LEFT_KNEE]?.visibility,
             landmarkMap[PoseLandmarkType.LEFT_ANKLE]?.visibility
         ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
         val rightLegScore = listOfNotNull(
             landmarkMap[PoseLandmarkType.RIGHT_HIP]?.visibility,
+            landmarkMap[PoseLandmarkType.RIGHT_KNEE]?.visibility,
             landmarkMap[PoseLandmarkType.RIGHT_ANKLE]?.visibility
         ).let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
@@ -254,6 +260,7 @@ class StartCameraActivity : AppCompatActivity() {
 
             if (elapsedMs < ANALYSIS_DURATION_MS) {
                 val remainingSec = ceil((ANALYSIS_DURATION_MS - elapsedMs) / 1000.0).toInt().coerceAtLeast(1)
+                val liveOrientationHint = setupAnalysisEvaluator.getLiveOrientationHint(detectedLandmarks)
 
                 runOnUiThread {
                     stickmanView.updateTrackingQuality(
@@ -267,6 +274,14 @@ class StartCameraActivity : AppCompatActivity() {
                     tvAnalyzingCountdown.text = "Analyzing setup... ${remainingSec}s"
                     btnStartExercise.text = "Analyzing (${remainingSec}s)..."
                     btnStartExercise.isEnabled = false
+
+                    if (liveOrientationHint != null) {
+                        tvStatusTip.text = liveOrientationHint
+                        tvStatusTip.setTextColor(Color.parseColor("#FFD600"))
+                    } else {
+                        tvStatusTip.text = "Keep your full body visible in the frame"
+                        tvStatusTip.setTextColor(Color.parseColor("#CCCCCC"))
+                    }
                 }
             } else {
                 // 7-second analysis window completed: compute final verdict
@@ -289,6 +304,7 @@ class StartCameraActivity : AppCompatActivity() {
                     tvResultIcon.visibility = View.VISIBLE
                     tvStatusHeadline.text = result.headline
                     tvStatusTip.text = result.actionableTip
+                    tvStatusTip.setTextColor(Color.parseColor("#CCCCCC"))
 
                     if (result.isGood) {
                         tvResultIcon.text = "✓"
@@ -301,10 +317,19 @@ class StartCameraActivity : AppCompatActivity() {
                     } else {
                         tvResultIcon.text = "⚠️"
                         tvResultIcon.setTextColor(Color.parseColor("#FFA726"))
-                        btnStartExercise.isEnabled = true // Always interactable after analysis!
-                        btnStartExercise.text = "Start Anyway"
-                        btnStartExercise.setBackgroundColor(Color.parseColor("#EF6C00"))
-                        btnStartExercise.setTextColor(Color.parseColor("#FFFFFF"))
+
+                        // Start Anyway distinction: offer only if view is not fundamentally incompatible
+                        if (result.canStartAnyway) {
+                            btnStartExercise.isEnabled = true
+                            btnStartExercise.text = "Start Anyway"
+                            btnStartExercise.setBackgroundColor(Color.parseColor("#EF6C00"))
+                            btnStartExercise.setTextColor(Color.parseColor("#FFFFFF"))
+                        } else {
+                            btnStartExercise.isEnabled = false
+                            btnStartExercise.text = "Turn to Align"
+                            btnStartExercise.setBackgroundColor(Color.parseColor("#424242"))
+                            btnStartExercise.setTextColor(Color.parseColor("#888888"))
+                        }
                         btnReanalyze.visibility = View.VISIBLE
                     }
                 }

@@ -39,7 +39,8 @@ object PositionGuidanceEvaluator {
     fun evaluate(
         landmarks: List<PoseLandmark>,
         hasPose: Boolean,
-        requiredIndices: List<Int> = listOf(11, 12, 13, 14, 15, 16, 23, 24, 27, 28)
+        requiredIndices: List<Int> = listOf(11, 12, 13, 14, 15, 16, 23, 24, 27, 28),
+        exerciseId: String = ""
     ): GuidanceResult {
         if (!hasPose || landmarks.isEmpty()) {
             return GuidanceResult(
@@ -100,10 +101,31 @@ object PositionGuidanceEvaluator {
         val avgAnkleY = listOfNotNull(leftAnkle?.y, rightAnkle?.y).average()
         val bodySpan = if (!avgShoulderY.isNaN() && !avgAnkleY.isNaN()) (avgAnkleY - avgShoulderY) else 0.5
 
+        // Orientation checks for exercises with hard view requirements
+        val shoulderWidth = if (leftShoulder != null && rightShoulder != null) {
+            kotlin.math.abs(leftShoulder.x - rightShoulder.x)
+        } else 0f
+
+        val normExerciseId = exerciseId.trim().lowercase()
+        val isSideRequired = normExerciseId in listOf("calf_raise", "plank", "mountain_climber")
+        val isFrontRequired = normExerciseId in listOf("jumping_jack", "side_plank")
+
+        val isWrongOrientation = when {
+            isSideRequired && shoulderWidth > 0.18f -> true
+            isFrontRequired && shoulderWidth < 0.10f -> true
+            else -> false
+        }
+
         val guidanceMessage: String
         val isWarning: Boolean
 
         when {
+            // 0. Wrong orientation for strict exercise
+            isWrongOrientation -> {
+                guidanceMessage = if (isSideRequired) "Turn sideways for this exercise" else "Face the camera for this exercise"
+                isWarning = true
+            }
+
             // 1. Proactive horizontal boundary warnings
             maxHipX > 0.85f -> {
                 guidanceMessage = "Move left — hip out of frame"
@@ -155,6 +177,7 @@ object PositionGuidanceEvaluator {
 
         // Actionable single-line message for INSUFFICIENT_VISIBILITY (Screen 2 clean style)
         val actionableInsufficientMessage = when {
+            isWrongOrientation -> if (isSideRequired) "Can't see you clearly — turn sideways" else "Can't see you clearly — face the camera"
             maxAnkleY > 0.88f || minShoulderY < 0.08f -> "Can't see you clearly — step back a bit"
             bodySpan > 0.0 && bodySpan < 0.28 -> "Can't see you clearly — step closer"
             maxHipX > 0.85f || minHipX < 0.15f || maxShoulderX > 0.88f || minShoulderX < 0.12f -> "Can't see you clearly — move toward center"

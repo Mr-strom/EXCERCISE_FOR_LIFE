@@ -226,7 +226,8 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // 2. Evaluate proactive position guidance
         val guidanceResult = PositionGuidanceEvaluator.evaluate(
             landmarks = poseResult.landmarks,
-            hasPose = poseResult.hasPose
+            hasPose = poseResult.hasPose,
+            exerciseId = exerciseId
         )
 
         // 3. Feed into full SDK analysis pipeline

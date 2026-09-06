@@ -579,4 +579,260 @@ class AppFlowTest {
         org.junit.Assert.assertFalse(controller.isInitialized)
         assertTrue(logOutput.any { it.contains("TTS initialization failed with code: -1 (TextToSpeech.ERROR)") })
     }
+
+    /**
+     * Acceptance Test: Stickman Indicator 3-tier color mapping:
+     * - Green: >= 0.60
+     * - Yellow: 0.40 <= score < 0.60
+     * - Red: < 0.40
+     */
+    @Test
+    fun testStickmanColorMappingThreeTiers() {
+        // Without pose detected -> NEUTRAL
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.NEUTRAL,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.9f, hasPose = false)
+        )
+
+        // Tier 1: Green (>= 0.60)
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.GOOD,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.85f, hasPose = true)
+        )
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.GOOD,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.60f, hasPose = true)
+        )
+
+        // Tier 2: Yellow (0.40 <= score < 0.60)
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.WARNING,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.59f, hasPose = true)
+        )
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.WARNING,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.50f, hasPose = true)
+        )
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.WARNING,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.40f, hasPose = true)
+        )
+
+        // Tier 3: Red (< 0.40)
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.BAD,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.39f, hasPose = true)
+        )
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.BAD,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.15f, hasPose = true)
+        )
+        assertEquals(
+            com.example.cvassessment.app.ui.StickmanIndicatorView.ColorTier.BAD,
+            com.example.cvassessment.app.ui.StickmanIndicatorView.evaluateColorTier(0.0f, hasPose = true)
+        )
+    }
+
+    /**
+     * Acceptance Test: Screen 2 setup analysis for at least one exercise per category:
+     * - Upper Body: Push-Up
+     * - Lower Body: Squat
+     * - Core / Static: Plank
+     * - Functional / Dynamic: Jumping Jack
+     */
+    @Test
+    fun testScreen2SetupAnalysisAcrossFourCategories() {
+        val cleanSideLandmarks = listOf(
+            createLandmark(0, 0.48f, 0.20f, 0.90f),  // Nose
+            createLandmark(11, 0.47f, 0.30f, 0.90f), // Left shoulder
+            createLandmark(12, 0.53f, 0.30f, 0.88f), // Right shoulder (narrow = 0.06 side profile)
+            createLandmark(13, 0.45f, 0.40f, 0.85f),
+            createLandmark(14, 0.55f, 0.40f, 0.85f),
+            createLandmark(15, 0.44f, 0.50f, 0.80f),
+            createLandmark(16, 0.56f, 0.50f, 0.80f),
+            createLandmark(23, 0.48f, 0.55f, 0.90f),
+            createLandmark(24, 0.52f, 0.55f, 0.90f),
+            createLandmark(25, 0.48f, 0.68f, 0.90f), // Left knee
+            createLandmark(26, 0.52f, 0.68f, 0.90f), // Right knee
+            createLandmark(27, 0.48f, 0.82f, 0.85f),
+            createLandmark(28, 0.52f, 0.82f, 0.85f)
+        )
+
+        val cleanFrontLandmarks = listOf(
+            createLandmark(0, 0.50f, 0.20f, 0.90f),  // Nose
+            createLandmark(11, 0.38f, 0.30f, 0.90f), // Left shoulder (wide = 0.24 front profile)
+            createLandmark(12, 0.62f, 0.30f, 0.90f), // Right shoulder
+            createLandmark(13, 0.35f, 0.40f, 0.85f),
+            createLandmark(14, 0.65f, 0.40f, 0.85f),
+            createLandmark(15, 0.32f, 0.50f, 0.80f),
+            createLandmark(16, 0.68f, 0.50f, 0.80f),
+            createLandmark(23, 0.42f, 0.55f, 0.90f),
+            createLandmark(24, 0.58f, 0.55f, 0.90f),
+            createLandmark(25, 0.42f, 0.68f, 0.90f), // Left knee
+            createLandmark(26, 0.58f, 0.68f, 0.90f), // Right knee
+            createLandmark(27, 0.42f, 0.82f, 0.85f),
+            createLandmark(28, 0.58f, 0.82f, 0.85f)
+        )
+
+        // 1. Upper Body: Push-Up
+        val pushUpEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("push_up")
+        for (i in 1..100) pushUpEvaluator.recordSample(cleanSideLandmarks, hasPose = true)
+        val pushUpResult = pushUpEvaluator.evaluate()
+        assertTrue("Push-Up side view should be good", pushUpResult.isGood)
+        assertEquals("Great! We can see you clearly.", pushUpResult.headline)
+        assertTrue(pushUpResult.canStartAnyway)
+
+        // 2. Lower Body: Squat
+        val squatEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("squat")
+        for (i in 1..100) squatEvaluator.recordSample(cleanSideLandmarks, hasPose = true)
+        val squatResult = squatEvaluator.evaluate()
+        assertTrue("Squat setup should be good", squatResult.isGood)
+        assertEquals("Great! We can see you clearly.", squatResult.headline)
+        assertTrue(squatResult.canStartAnyway)
+
+        // 3. Core / Static: Plank
+        val plankEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("plank")
+        for (i in 1..100) plankEvaluator.recordSample(cleanSideLandmarks, hasPose = true)
+        val plankResult = plankEvaluator.evaluate()
+        assertTrue("Plank side view should be good", plankResult.isGood)
+        assertEquals("Great! We can see you clearly.", plankResult.headline)
+        assertTrue(plankResult.canStartAnyway)
+
+        // 4. Functional / Dynamic: Jumping Jack
+        val jackEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("jumping_jack")
+        for (i in 1..100) jackEvaluator.recordSample(cleanFrontLandmarks, hasPose = true)
+        val jackResult = jackEvaluator.evaluate()
+        assertTrue("Jumping Jack front view should be good", jackResult.isGood)
+        assertEquals("Great! We can see you clearly.", jackResult.headline)
+        assertTrue(jackResult.canStartAnyway)
+    }
+
+    /**
+     * Acceptance Test: "Start Anyway" button distinction for hard view requirements.
+     * - Hard view requirement violated -> "Start Anyway" is BLOCKED (canStartAnyway = false).
+     * - Non-strict or general borderline quality -> "Start Anyway" is OFFERED (canStartAnyway = true).
+     */
+    @Test
+    fun testStartAnywayDistinctionForHardViewRequirements() {
+        val frontLandmarksWide = listOf(
+            createLandmark(0, 0.50f, 0.20f, 0.90f),
+            createLandmark(11, 0.38f, 0.30f, 0.90f), // shoulderWidth = 0.24 (> 0.18 front profile)
+            createLandmark(12, 0.62f, 0.30f, 0.90f),
+            createLandmark(13, 0.35f, 0.40f, 0.85f),
+            createLandmark(14, 0.65f, 0.40f, 0.85f),
+            createLandmark(15, 0.32f, 0.50f, 0.80f),
+            createLandmark(16, 0.68f, 0.50f, 0.80f),
+            createLandmark(23, 0.42f, 0.55f, 0.90f),
+            createLandmark(24, 0.58f, 0.55f, 0.90f),
+            createLandmark(25, 0.42f, 0.68f, 0.90f),
+            createLandmark(26, 0.58f, 0.68f, 0.90f),
+            createLandmark(27, 0.42f, 0.82f, 0.85f),
+            createLandmark(28, 0.58f, 0.82f, 0.85f)
+        )
+
+        val sideLandmarksNarrow = listOf(
+            createLandmark(0, 0.50f, 0.20f, 0.90f),
+            createLandmark(11, 0.47f, 0.30f, 0.90f), // shoulderWidth = 0.05 (< 0.10 side profile)
+            createLandmark(12, 0.52f, 0.30f, 0.90f),
+            createLandmark(13, 0.45f, 0.40f, 0.85f),
+            createLandmark(14, 0.55f, 0.40f, 0.85f),
+            createLandmark(15, 0.44f, 0.50f, 0.80f),
+            createLandmark(16, 0.56f, 0.50f, 0.80f),
+            createLandmark(23, 0.48f, 0.55f, 0.90f),
+            createLandmark(24, 0.52f, 0.55f, 0.90f),
+            createLandmark(25, 0.48f, 0.68f, 0.90f),
+            createLandmark(26, 0.52f, 0.68f, 0.90f),
+            createLandmark(27, 0.48f, 0.82f, 0.85f),
+            createLandmark(28, 0.52f, 0.82f, 0.85f)
+        )
+
+        // 1. Calf Raise: Hard SIDE requirement. Given front landmarks -> Start Anyway BLOCKED
+        val calfEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("calf_raise")
+        for (i in 1..100) calfEvaluator.recordSample(frontLandmarksWide, hasPose = true)
+        val calfResult = calfEvaluator.evaluate()
+        org.junit.Assert.assertFalse("Calf Raise facing front must not pass", calfResult.isGood)
+        assertEquals("Turn sideways for this exercise", calfResult.headline)
+        org.junit.Assert.assertFalse("Start Anyway must be BLOCKED when hard view requirement is violated", calfResult.canStartAnyway)
+
+        // 2. Jumping Jack: Hard FRONT requirement. Given side landmarks -> Start Anyway BLOCKED
+        val jackEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("jumping_jack")
+        for (i in 1..100) jackEvaluator.recordSample(sideLandmarksNarrow, hasPose = true)
+        val jackResult = jackEvaluator.evaluate()
+        org.junit.Assert.assertFalse("Jumping Jack facing sideways must not pass", jackResult.isGood)
+        assertEquals("Turn to face the camera", jackResult.headline)
+        org.junit.Assert.assertFalse("Start Anyway must be BLOCKED when hard view requirement is violated", jackResult.canStartAnyway)
+
+        // 3. Push-Up: Side view preferred (non-strict). Given front landmarks -> Start Anyway ALLOWED
+        val pushUpEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("push_up")
+        // Low confidence + front view
+        val borderlineLandmarks = frontLandmarksWide.map { createLandmark(it.index, it.x, it.y, 0.55f) }
+        for (i in 1..100) pushUpEvaluator.recordSample(borderlineLandmarks, hasPose = true)
+        val pushUpResult = pushUpEvaluator.evaluate()
+        org.junit.Assert.assertFalse(pushUpResult.isGood)
+        assertTrue("Start Anyway must be ALLOWED for preferred exercises with borderline conditions", pushUpResult.canStartAnyway)
+    }
+
+    /**
+     * Acceptance Test: Live orientation hints during 7s analysis countdown.
+     */
+    @Test
+    fun testLiveOrientationHintsDuringAnalysis() {
+        val frontLandmarks = listOf(
+            createLandmark(11, 0.38f, 0.30f, 0.85f),
+            createLandmark(12, 0.62f, 0.30f, 0.85f) // width = 0.24
+        )
+        val sideLandmarks = listOf(
+            createLandmark(11, 0.47f, 0.30f, 0.85f),
+            createLandmark(12, 0.52f, 0.30f, 0.85f) // width = 0.05
+        )
+
+        // Calf Raise requires side view -> front landmarks trigger hint
+        val calfEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("calf_raise")
+        assertEquals("Turn sideways for this exercise", calfEvaluator.getLiveOrientationHint(frontLandmarks))
+        assertNull(calfEvaluator.getLiveOrientationHint(sideLandmarks))
+
+        // Jumping Jack requires front view -> side landmarks trigger hint
+        val jackEvaluator = com.example.cvassessment.app.ui.SetupAnalysisEvaluator("jumping_jack")
+        assertEquals("Face the camera for this exercise", jackEvaluator.getLiveOrientationHint(sideLandmarks))
+        assertNull(jackEvaluator.getLiveOrientationHint(frontLandmarks))
+    }
+
+    /**
+     * Acceptance Test: Screen 3 orientation-aware insufficient visibility messages.
+     */
+    @Test
+    fun testScreen3OrientationAwareInsufficientVisibility() {
+        val frontLandmarks = listOf(
+            createLandmark(11, 0.38f, 0.30f, 0.85f),
+            createLandmark(12, 0.62f, 0.30f, 0.85f),
+            createLandmark(23, 0.40f, 0.55f, 0.85f),
+            createLandmark(24, 0.60f, 0.55f, 0.85f),
+            createLandmark(27, 0.40f, 0.80f, 0.85f),
+            createLandmark(28, 0.60f, 0.80f, 0.85f)
+        )
+        val sideLandmarks = listOf(
+            createLandmark(11, 0.47f, 0.30f, 0.85f),
+            createLandmark(12, 0.52f, 0.30f, 0.85f),
+            createLandmark(23, 0.48f, 0.55f, 0.85f),
+            createLandmark(24, 0.52f, 0.55f, 0.85f),
+            createLandmark(27, 0.48f, 0.80f, 0.85f),
+            createLandmark(28, 0.52f, 0.80f, 0.85f)
+        )
+
+        // Calf raise with front view
+        val calfGuidance = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(
+            landmarks = frontLandmarks,
+            hasPose = true,
+            exerciseId = "calf_raise"
+        )
+        assertEquals("Can't see you clearly — turn sideways", calfGuidance.actionableInsufficientMessage)
+
+        // Jumping Jack with side view
+        val jackGuidance = com.example.cvassessment.app.ui.PositionGuidanceEvaluator.evaluate(
+            landmarks = sideLandmarks,
+            hasPose = true,
+            exerciseId = "jumping_jack"
+        )
+        assertEquals("Can't see you clearly — face the camera", jackGuidance.actionableInsufficientMessage)
+    }
 }

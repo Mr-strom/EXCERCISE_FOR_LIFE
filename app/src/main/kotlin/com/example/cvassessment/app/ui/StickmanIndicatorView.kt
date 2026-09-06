@@ -40,11 +40,12 @@ class StickmanIndicatorView @JvmOverloads constructor(
     var rightLegQuality: Float = 1.0f
         private set
 
-    // Colors
-    private val colorGood = Color.parseColor("#00E676")       // Vibrant Green
-    private val colorBad = Color.parseColor("#FF5252")        // Alert Red
-    private val colorGlow = Color.parseColor("#80FF1744")      // Red Alert Glow
-    private val colorNeutral = Color.parseColor("#60FFFFFF")   // Soft silhouette guide
+    // Colors per spec: Green (>=0.6), Red (<0.4), Yellow (0.4-0.6)
+    val colorGood = Color.parseColor("#00E676")       // Vibrant Green (>= 0.6)
+    val colorWarning = Color.parseColor("#FFD600")    // Amber Yellow (0.4 to 0.6)
+    val colorBad = Color.parseColor("#FF5252")        // Alert Red (< 0.4)
+    val colorGlow = Color.parseColor("#80FF1744")      // Red Alert Glow
+    val colorNeutral = Color.parseColor("#60FFFFFF")   // Soft silhouette guide
 
     // Paints
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -120,9 +121,31 @@ class StickmanIndicatorView @JvmOverloads constructor(
         invalidate()
     }
 
-    private fun getColorForScore(score: Float): Int {
-        if (!hasPose) return colorNeutral
-        return if (score >= 0.40f) colorGood else colorBad
+    enum class ColorTier {
+        NEUTRAL,
+        GOOD,
+        WARNING,
+        BAD
+    }
+
+    companion object {
+        fun evaluateColorTier(score: Float, hasPose: Boolean): ColorTier {
+            if (!hasPose) return ColorTier.NEUTRAL
+            return when {
+                score >= 0.60f -> ColorTier.GOOD       // GREEN: avg visibility >= 0.6
+                score < 0.40f -> ColorTier.BAD         // RED: avg visibility < 0.4
+                else -> ColorTier.WARNING              // YELLOW: in between (0.4 <= score < 0.6)
+            }
+        }
+    }
+
+    fun getColorForScore(score: Float): Int {
+        return when (evaluateColorTier(score, hasPose)) {
+            ColorTier.NEUTRAL -> colorNeutral
+            ColorTier.GOOD -> colorGood
+            ColorTier.WARNING -> colorWarning
+            ColorTier.BAD -> colorBad
+        }
     }
 
     private fun isPartBad(score: Float): Boolean {
