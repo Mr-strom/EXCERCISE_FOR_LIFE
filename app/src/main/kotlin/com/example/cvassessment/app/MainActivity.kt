@@ -114,5 +114,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardJumpingJack = findViewById<View>(R.id.cardJumpingJack)
+        cardJumpingJack.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "jumping_jack"
+            SessionDataHolder.selectedExerciseName = "Jumping Jack"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "jumping_jack")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Jumping Jack")
+            }
+            startActivity(intent)
+        }
     }
 }

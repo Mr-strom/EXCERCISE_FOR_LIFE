@@ -592,6 +592,77 @@ data class ExerciseConfig(
         )
 
         /**
+         * Jumping Jack specification per EXERCISE_SPEC.md #9, METRICS_SPEC.md, and FORM_RULES.md:
+         * - category: dynamic_rep
+         * - primaryLandmarks: [wrists, shoulders, ankles, hips]
+         * - trackedAngles: [arm_abduction_angle, leg_spread_angle]
+         * - phases: closed (arms down, feet together) -> open (arms overhead, feet apart) -> closed
+         * - romDefinition: combined arm_abduction (>=150°) and leg_spread (>=45°); 100% = both fully reached
+         * - tutBaseline: 1.2s/rep (0.6s open + 0.6s close, fast dynamic tempo)
+         * - cameraNotes: "front view required — side view cannot capture leg spread or arm symmetry"
+         */
+        val JUMPING_JACK = ExerciseConfig(
+            exerciseId = "jumping_jack",
+            name = "Jumping Jack",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("wrists", "shoulders", "ankles", "hips"),
+            trackedAngles = listOf("arm_abduction_angle", "leg_spread_angle"),
+            phases = mapOf(
+                "closed" to PhaseCondition(
+                    phaseName = "closed",
+                    trackedAngleName = "arm_abduction_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 35.0f,
+                    toleranceDeg = 10.0f
+                ),
+                "open" to PhaseCondition(
+                    phaseName = "open",
+                    trackedAngleName = "arm_abduction_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 145.0f,
+                    toleranceDeg = 10.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "arm_abduction_angle",
+                fullExpectedAngle = 150.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 30.0f,
+                description = "combined arm_abduction (>=150°) and leg_spread (>=45°); 100% = both fully reached"
+            ),
+            tutBaseline = 1.2f,
+            cameraNotes = "front view required — side view cannot capture leg spread or arm symmetry",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "arm_abduction_angle",
+                    firstJoint = PoseLandmarkType.LEFT_ELBOW,
+                    vertexJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    lastJoint = PoseLandmarkType.LEFT_HIP,
+                    description = "Arm abduction angle (elbow-shoulder-hip)"
+                ),
+                JointAngleDefinition(
+                    angleName = "leg_spread_angle",
+                    firstJoint = PoseLandmarkType.LEFT_ANKLE,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.RIGHT_ANKLE,
+                    description = "Leg spread angle (ankle-hip-ankle)"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_ELBOW,     // 13
+                PoseLandmarkType.RIGHT_ELBOW,    // 14
+                PoseLandmarkType.LEFT_WRIST,     // 15
+                PoseLandmarkType.RIGHT_WRIST,    // 16
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE     // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

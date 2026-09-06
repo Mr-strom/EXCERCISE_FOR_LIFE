@@ -18,7 +18,8 @@ object ExerciseRegistry {
         ExerciseConfig.LUNGE.exerciseId to ExerciseConfig.LUNGE,
         ExerciseConfig.CALF_RAISE.exerciseId to ExerciseConfig.CALF_RAISE,
         ExerciseConfig.PLANK.exerciseId to ExerciseConfig.PLANK,
-        ExerciseConfig.SIDE_PLANK.exerciseId to ExerciseConfig.SIDE_PLANK
+        ExerciseConfig.SIDE_PLANK.exerciseId to ExerciseConfig.SIDE_PLANK,
+        ExerciseConfig.JUMPING_JACK.exerciseId to ExerciseConfig.JUMPING_JACK
     )
 
     /**
