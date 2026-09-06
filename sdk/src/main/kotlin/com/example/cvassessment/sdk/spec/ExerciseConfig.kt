@@ -663,6 +663,78 @@ data class ExerciseConfig(
         )
 
         /**
+         * Canonical Mountain Climber specification from EXERCISE_SPEC.md.
+         *
+         * - category: dynamic_rep
+         * - primaryLandmarks: [hips, knees, shoulders, wrists]
+         * - trackedAngles: [knee_drive_angle, hip_line_angle]
+         * - phases: extended (knee_drive_angle > 160°, leg back) -> driven (knee_drive_angle < 90°, knee pulled to chest) -> extended
+         * - romDefinition: knee_drive_angle range; 100% = knee reaching <= 90°
+         * - tutBaseline: 1.0s/rep (0.5s drive + 0.5s return, fast dynamic tempo)
+         * - cameraNotes: "side view preferred for knee drive depth; plank hip stability (form check) also uses side view"
+         */
+        val MOUNTAIN_CLIMBER = ExerciseConfig(
+            exerciseId = "mountain_climber",
+            name = "Mountain Climber",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("hips", "knees", "shoulders", "wrists"),
+            trackedAngles = listOf("knee_drive_angle", "hip_line_angle"),
+            phases = mapOf(
+                "extended" to PhaseCondition(
+                    phaseName = "extended",
+                    trackedAngleName = "knee_drive_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 150.0f,
+                    toleranceDeg = 10.0f
+                ),
+                "driven" to PhaseCondition(
+                    phaseName = "driven",
+                    trackedAngleName = "knee_drive_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 90.0f,
+                    toleranceDeg = 10.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "knee_drive_angle",
+                fullExpectedAngle = 90.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 160.0f,
+                description = "knee_drive_angle range; 100% = knee reaching <= 90 deg depth"
+            ),
+            tutBaseline = 1.0f,
+            cameraNotes = "side view preferred for knee drive depth; plank hip stability (form check) also uses side view",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "knee_drive_angle",
+                    firstJoint = PoseLandmarkType.LEFT_HIP,
+                    vertexJoint = PoseLandmarkType.LEFT_KNEE,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Knee drive angle (hip-knee-ankle of driving leg)"
+                ),
+                JointAngleDefinition(
+                    angleName = "hip_line_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_HIP,
+                    lastJoint = PoseLandmarkType.LEFT_ANKLE,
+                    description = "Plank stability hip line angle (shoulder-hip-ankle)"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_WRIST,     // 15
+                PoseLandmarkType.RIGHT_WRIST,    // 16
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP,      // 24
+                PoseLandmarkType.LEFT_KNEE,      // 25
+                PoseLandmarkType.RIGHT_KNEE,     // 26
+                PoseLandmarkType.LEFT_ANKLE,     // 27
+                PoseLandmarkType.RIGHT_ANKLE     // 28
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

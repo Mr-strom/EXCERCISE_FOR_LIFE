@@ -126,5 +126,17 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(intent)
         }
+
+        val cardMountainClimber = findViewById<View>(R.id.cardMountainClimber)
+        cardMountainClimber.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "mountain_climber"
+            SessionDataHolder.selectedExerciseName = "Mountain Climber"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "mountain_climber")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Mountain Climber")
+            }
+            startActivity(intent)
+        }
     }
 }

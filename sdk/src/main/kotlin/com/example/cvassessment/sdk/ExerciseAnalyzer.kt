@@ -4,6 +4,7 @@ import com.example.cvassessment.sdk.form.BicepCurlFormRuleEngine
 import com.example.cvassessment.sdk.form.CalfRaiseFormRuleEngine
 import com.example.cvassessment.sdk.form.FormRuleEngine
 import com.example.cvassessment.sdk.form.JumpingJackFormRuleEngine
+import com.example.cvassessment.sdk.form.MountainClimberFormRuleEngine
 import com.example.cvassessment.sdk.form.LungeFormRuleEngine
 import com.example.cvassessment.sdk.form.PlankFormRuleEngine
 import com.example.cvassessment.sdk.form.ShoulderPressFormRuleEngine
@@ -24,6 +25,8 @@ import com.example.cvassessment.sdk.statemachine.CalfRaiseStateMachine
 import com.example.cvassessment.sdk.statemachine.ExerciseStateMachine
 import com.example.cvassessment.sdk.statemachine.JumpingJackGeometry
 import com.example.cvassessment.sdk.statemachine.JumpingJackStateMachine
+import com.example.cvassessment.sdk.statemachine.MountainClimberGeometry
+import com.example.cvassessment.sdk.statemachine.MountainClimberStateMachine
 import com.example.cvassessment.sdk.statemachine.LungeGeometry
 import com.example.cvassessment.sdk.statemachine.LungeStateMachine
 import com.example.cvassessment.sdk.statemachine.PlankGeometry
@@ -36,6 +39,7 @@ import com.example.cvassessment.sdk.visibility.BicepCurlVisibilityGate
 import com.example.cvassessment.sdk.visibility.CalfRaiseVisibilityGate
 import com.example.cvassessment.sdk.visibility.FrameVisibilityResult
 import com.example.cvassessment.sdk.visibility.JumpingJackVisibilityGate
+import com.example.cvassessment.sdk.visibility.MountainClimberVisibilityGate
 import com.example.cvassessment.sdk.visibility.LungeVisibilityGate
 import com.example.cvassessment.sdk.visibility.PlankVisibilityGate
 import com.example.cvassessment.sdk.visibility.ShoulderPressVisibilityGate
@@ -65,6 +69,7 @@ class ExerciseAnalyzer(
     val isPlank: Boolean = exerciseId.trim().lowercase() == "plank"
     val isSidePlank: Boolean = exerciseId.trim().lowercase() in listOf("side_plank", "sideplank")
     val isJumpingJack: Boolean = exerciseId.trim().lowercase() in listOf("jumping_jack", "jumpingjack")
+    val isMountainClimber: Boolean = exerciseId.trim().lowercase() in listOf("mountain_climber", "mountainclimber")
 
     // Pipeline modules (enforced as internal to /sdk to maintain clean architectural boundary)
     internal val visibilityGate = VisibilityGate(exerciseId = exerciseId)
@@ -76,6 +81,7 @@ class ExerciseAnalyzer(
     internal val plankVisibilityGate = PlankVisibilityGate()
     internal val sidePlankVisibilityGate = SidePlankVisibilityGate()
     internal val jumpingJackVisibilityGate = JumpingJackVisibilityGate()
+    internal val mountainClimberVisibilityGate = MountainClimberVisibilityGate()
 
     internal val stateMachine = ExerciseStateMachine(config = config)
     internal val squatStateMachine = SquatStateMachine(config = config)
@@ -86,6 +92,7 @@ class ExerciseAnalyzer(
     internal val plankStateMachine = PlankStateMachine(config = config)
     internal val sidePlankStateMachine = SidePlankStateMachine(config = config)
     internal val jumpingJackStateMachine = JumpingJackStateMachine(config = config)
+    internal val mountainClimberStateMachine = MountainClimberStateMachine(config = config)
 
     internal val metricsEngine = MetricsEngine(config = config)
 
@@ -98,6 +105,7 @@ class ExerciseAnalyzer(
     internal val plankFormRuleEngine = PlankFormRuleEngine()
     internal val sidePlankFormRuleEngine = SidePlankFormRuleEngine()
     internal val jumpingJackFormRuleEngine = JumpingJackFormRuleEngine()
+    internal val mountainClimberFormRuleEngine = MountainClimberFormRuleEngine()
 
     internal val outputGate = OutputGate(config = config)
     internal val squatOutputGate = SquatOutputGate(config = config)
@@ -177,6 +185,7 @@ class ExerciseAnalyzer(
      */
     fun analyzePose(poseResult: PoseEstimationResult): FrameResult {
         val visResult = when {
+            isMountainClimber -> mountainClimberVisibilityGate.checkFrame(poseResult)
             isSidePlank -> sidePlankVisibilityGate.checkFrame(poseResult, sidePlankStateMachine.supportSide)
             isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
@@ -190,6 +199,7 @@ class ExerciseAnalyzer(
         val isVisible = visResult.status == VisibilityStatus.SUFFICIENT_VISIBILITY
 
         val state = when {
+            isMountainClimber -> mountainClimberStateMachine.processFrame(poseResult, isVisible)
             isSidePlank -> sidePlankStateMachine.processFrame(poseResult, isVisible)
             isPlank -> plankStateMachine.processFrame(poseResult, isVisible)
             isCalfRaise -> calfRaiseStateMachine.processFrame(poseResult, isVisible)
@@ -201,6 +211,7 @@ class ExerciseAnalyzer(
             else -> stateMachine.processFrame(poseResult, isVisible)
         }
         val metrics = when {
+            isMountainClimber -> mountainClimberStateMachine.getFrameMetrics(state, isVisible)
             isSidePlank -> sidePlankStateMachine.getFrameMetrics(state, isVisible)
             isPlank -> plankStateMachine.getFrameMetrics(state, isVisible)
             isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, poseResult, isVisible)
@@ -216,6 +227,14 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isMountainClimber -> {
+                mountainClimberFormRuleEngine.processFrame(
+                    exerciseState = state,
+                    poseResult = poseResult,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisible
+                )
+            }
             isSidePlank -> {
                 sidePlankFormRuleEngine.processFrame(
                     exerciseState = state,
@@ -349,8 +368,8 @@ class ExerciseAnalyzer(
         isSideViewOverride: Boolean? = null,
         heelY: Float? = null
     ): FrameResult {
-        // Hard requirement for Calf Raise/Plank (side view required) and Jumping Jack (front view required)
-        val visStatus = if (!isVisibilitySufficient || (isCalfRaise && isSideViewOverride == false) || (isPlank && isSideViewOverride == false) || (isJumpingJack && isSideViewOverride == true)) {
+        // Hard requirement for Calf Raise/Plank/Mountain Climber (side view required) and Jumping Jack (front view required)
+        val visStatus = if (!isVisibilitySufficient || (isCalfRaise && isSideViewOverride == false) || (isPlank && isSideViewOverride == false) || (isMountainClimber && isSideViewOverride == false) || (isJumpingJack && isSideViewOverride == true)) {
             VisibilityStatus.INSUFFICIENT_VISIBILITY
         } else {
             VisibilityStatus.SUFFICIENT_VISIBILITY
@@ -364,6 +383,7 @@ class ExerciseAnalyzer(
                 val actualHeelY = heelY ?: if (elbowAngle > 1.0f) (elbowAngle / 100.0f) else elbowAngle
                 calfRaiseStateMachine.processHeelY(actualHeelY, timestampMs, isVisSufficient)
             }
+            isMountainClimber -> mountainClimberStateMachine.processAngles(elbowAngle, hipLineAngle, timestampMs, isVisSufficient)
             isJumpingJack -> jumpingJackStateMachine.processAngles(elbowAngle, hipLineAngle, timestampMs, isVisSufficient)
             isLunge -> {
                 lungeStateMachine.processAngles(
@@ -408,6 +428,7 @@ class ExerciseAnalyzer(
         )
 
         val metrics = when {
+            isMountainClimber -> mountainClimberStateMachine.getFrameMetrics(state, isVisSufficient)
             isSidePlank -> sidePlankStateMachine.getFrameMetrics(state, isVisSufficient)
             isPlank -> plankStateMachine.getFrameMetrics(state, isVisSufficient)
             isCalfRaise -> calfRaiseStateMachine.getFrameMetrics(state, mockPose, isVisSufficient)
@@ -423,6 +444,19 @@ class ExerciseAnalyzer(
         }
 
         val form = when {
+            isMountainClimber -> {
+                mountainClimberFormRuleEngine.evaluateFrame(
+                    kneeAngle = elbowAngle,
+                    hipLineAngle = hipLineAngle,
+                    phase = state.phase,
+                    isRepInProgress = state.isRepInProgress,
+                    currentRepIndex = if (state.isRepInProgress) state.completeRepCount + 1 else state.completeRepCount,
+                    timestampMs = timestampMs,
+                    confidence = confidence,
+                    completedRepMetrics = metrics.latestCompletedRepMetrics,
+                    isVisibilitySufficient = isVisSufficient
+                )
+            }
             isSidePlank -> {
                 sidePlankFormRuleEngine.evaluateFrame(
                     bodyLineAngle = hipLineAngle,
@@ -587,6 +621,7 @@ class ExerciseAnalyzer(
      */
     fun checkVisibility(poseResult: PoseEstimationResult): FrameVisibilityResult {
         return when {
+            isMountainClimber -> mountainClimberVisibilityGate.checkFrame(poseResult)
             isSidePlank -> sidePlankVisibilityGate.checkFrame(poseResult, sidePlankStateMachine.supportSide)
             isPlank -> plankVisibilityGate.checkFrame(poseResult)
             isCalfRaise -> calfRaiseVisibilityGate.checkFrame(poseResult)
@@ -606,6 +641,7 @@ class ExerciseAnalyzer(
      */
     fun getSessionResult(): SessionResult {
         val totalFrames = when {
+            isMountainClimber -> mountainClimberVisibilityGate.totalFramesAnalyzed
             isSidePlank -> sidePlankVisibilityGate.totalFramesAnalyzed
             isPlank -> plankVisibilityGate.totalFramesAnalyzed
             isCalfRaise -> calfRaiseVisibilityGate.totalFramesAnalyzed
@@ -618,6 +654,7 @@ class ExerciseAnalyzer(
         }
         val visStatus = if (totalFrames > 0L) {
             when {
+                isMountainClimber -> mountainClimberVisibilityGate.getSessionVisibilityStatus()
                 isSidePlank -> sidePlankVisibilityGate.getSessionVisibilityStatus()
                 isPlank -> plankVisibilityGate.getSessionVisibilityStatus()
                 isCalfRaise -> calfRaiseVisibilityGate.getSessionVisibilityStatus()
@@ -669,6 +706,7 @@ class ExerciseAnalyzer(
         }
 
         val currentState = when {
+            isMountainClimber -> mountainClimberStateMachine.currentState
             isCalfRaise -> calfRaiseStateMachine.currentState
             isJumpingJack -> jumpingJackStateMachine.currentState
             isLunge -> lungeStateMachine.currentState
@@ -678,6 +716,7 @@ class ExerciseAnalyzer(
             else -> stateMachine.currentState
         }
         val completeReps = when {
+            isMountainClimber -> mountainClimberStateMachine.completeReps
             isCalfRaise -> calfRaiseStateMachine.completeReps
             isJumpingJack -> jumpingJackStateMachine.completeReps
             isLunge -> lungeStateMachine.completeReps
@@ -687,6 +726,7 @@ class ExerciseAnalyzer(
             else -> stateMachine.completeReps
         }
         val sessionErrors = when {
+            isMountainClimber -> mountainClimberFormRuleEngine.allSessionErrors
             isCalfRaise -> calfRaiseFormRuleEngine.allSessionErrors
             isJumpingJack -> jumpingJackFormRuleEngine.allSessionErrors
             isLunge -> lungeFormRuleEngine.allSessionErrors
@@ -696,6 +736,7 @@ class ExerciseAnalyzer(
             else -> formRuleEngine.allSessionErrors
         }
         val feedbackEvents = when {
+            isMountainClimber -> mountainClimberFormRuleEngine.allFeedbackEvents
             isCalfRaise -> calfRaiseFormRuleEngine.allFeedbackEvents
             isJumpingJack -> jumpingJackFormRuleEngine.allFeedbackEvents
             isLunge -> lungeFormRuleEngine.allFeedbackEvents
@@ -705,7 +746,9 @@ class ExerciseAnalyzer(
             else -> formRuleEngine.allFeedbackEvents
         }
 
-        val sessionRepMetrics = if (isCalfRaise) {
+        val sessionRepMetrics = if (isMountainClimber) {
+            mountainClimberStateMachine.allRepMetrics
+        } else if (isCalfRaise) {
             calfRaiseStateMachine.allRepMetrics
         } else if (isJumpingJack) {
             jumpingJackStateMachine.allRepMetrics
@@ -715,6 +758,8 @@ class ExerciseAnalyzer(
 
         val sessionConfidence = if (sessionRepMetrics.isNotEmpty()) {
             sessionRepMetrics.map { it.confidence }.average().toFloat()
+        } else if (isMountainClimber && mountainClimberStateMachine.latestCompletedRepMetrics != null) {
+            mountainClimberStateMachine.latestCompletedRepMetrics!!.confidence
         } else if (isCalfRaise && calfRaiseStateMachine.latestCompletedRepMetrics != null) {
             calfRaiseStateMachine.latestCompletedRepMetrics!!.confidence
         } else if (isJumpingJack && jumpingJackStateMachine.latestCompletedRepMetrics != null) {
@@ -753,6 +798,7 @@ class ExerciseAnalyzer(
      */
     val latestCompletedRepMetrics: RepMetrics?
         get() = when {
+            isMountainClimber -> mountainClimberStateMachine.latestCompletedRepMetrics
             isCalfRaise -> calfRaiseStateMachine.latestCompletedRepMetrics
             isJumpingJack -> jumpingJackStateMachine.latestCompletedRepMetrics
             else -> metricsEngine.latestCompletedRepMetrics
@@ -763,6 +809,7 @@ class ExerciseAnalyzer(
      */
     val allRepMetrics: List<RepMetrics>
         get() = when {
+            isMountainClimber -> mountainClimberStateMachine.allRepMetrics
             isCalfRaise -> calfRaiseStateMachine.allRepMetrics
             isJumpingJack -> jumpingJackStateMachine.allRepMetrics
             else -> metricsEngine.allRepMetrics
@@ -773,6 +820,7 @@ class ExerciseAnalyzer(
      */
     fun getRepFormScore(repIndex: Int): Int {
         val sessionErrors = when {
+            isMountainClimber -> mountainClimberFormRuleEngine.allSessionErrors
             isCalfRaise -> calfRaiseFormRuleEngine.allSessionErrors
             isJumpingJack -> jumpingJackFormRuleEngine.allSessionErrors
             isLunge -> lungeFormRuleEngine.allSessionErrors
@@ -793,6 +841,11 @@ class ExerciseAnalyzer(
      */
     fun reset() {
         when {
+            isMountainClimber -> {
+                mountainClimberVisibilityGate.reset()
+                mountainClimberStateMachine.reset()
+                mountainClimberFormRuleEngine.reset()
+            }
             isSidePlank -> {
                 sidePlankVisibilityGate.reset()
                 sidePlankStateMachine.reset()
