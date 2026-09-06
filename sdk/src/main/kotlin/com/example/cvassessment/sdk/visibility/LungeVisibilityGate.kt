@@ -24,7 +24,9 @@ internal class LungeVisibilityGate(
     val landmarkVisibilityThreshold: Float = 0.4f,
     val maxMissingFrames: Int = 7,
     val sessionFailureThreshold: Float = 0.50f,
-    val boundaryMargin: Float = 0.02f
+    val boundaryMargin: Float = 0.02f,
+    val ankleCutoffY: Float = 0.92f,
+    val maxAnkleMissingFrames: Int = 3
 ) {
     companion object {
         val LUNGE_REQUIRED_LANDMARKS = listOf(
@@ -40,6 +42,18 @@ internal class LungeVisibilityGate(
     }
 
     private val consecutiveMissingCounts = mutableMapOf<Int, Int>()
+
+    var isDebugLoggingEnabled: Boolean = false
+    var debugLogger: ((String) -> Unit)? = null
+
+    private fun logDebug(msg: String) {
+        if (!isDebugLoggingEnabled) return
+        debugLogger?.invoke(msg)
+        try {
+            android.util.Log.d("LungeVisibilityGate", msg)
+        } catch (_: Throwable) {
+        }
+    }
 
     var totalFramesAnalyzed: Long = 0L
         private set
@@ -90,7 +104,13 @@ internal class LungeVisibilityGate(
                 landmarkMap[PoseLandmarkType.RIGHT_KNEE] != null &&
                 landmarkMap[PoseLandmarkType.RIGHT_ANKLE] != null
 
-        if ((!leftLegPresent && !rightLegPresent) || outOfFrameDetected) {
+        // D13: Ankle cutoff check at bottom boundary (e.g. feet cut off during backward step)
+        val leftAnkle = landmarkMap[PoseLandmarkType.LEFT_ANKLE]
+        val rightAnkle = landmarkMap[PoseLandmarkType.RIGHT_ANKLE]
+        val ankleOutOfFrame = (leftAnkle != null && leftAnkle.y >= ankleCutoffY) ||
+                (rightAnkle != null && rightAnkle.y >= ankleCutoffY)
+
+        if ((!leftLegPresent && !rightLegPresent) || outOfFrameDetected || ankleOutOfFrame) {
             reasons.add(VisibilityFailureReason.BODY_OUT_OF_FRAME)
         }
 
@@ -125,17 +145,33 @@ internal class LungeVisibilityGate(
             reasons.add(VisibilityFailureReason.LOW_CONFIDENCE)
         }
 
+        // D13: Strict ankle missing check — if either ankle is missing/occluded > maxAnkleMissingFrames (3 frames)
+        val leftAnkleMissing = consecutiveMissingCounts[PoseLandmarkType.LEFT_ANKLE] ?: 0
+        val rightAnkleMissing = consecutiveMissingCounts[PoseLandmarkType.RIGHT_ANKLE] ?: 0
+        if (leftAnkleMissing > maxAnkleMissingFrames || rightAnkleMissing > maxAnkleMissingFrames) {
+            reasons.add(VisibilityFailureReason.LOW_CONFIDENCE)
+        }
+
         val isInsufficient = reasons.isNotEmpty()
         if (isInsufficient) {
             failedVisibilityFrames++
         }
 
-        return FrameVisibilityResult(
+        val result = FrameVisibilityResult(
             status = if (isInsufficient) VisibilityStatus.INSUFFICIENT_VISIBILITY else VisibilityStatus.SUFFICIENT_VISIBILITY,
             failureReasons = reasons.distinct(),
             missingLandmarkIndices = missingIndices,
             consecutiveMissingCounts = consecutiveMissingCounts.toMap()
         )
+
+        val lY = leftAnkle?.y?.let { "%.2f".format(it) } ?: "null"
+        val lConf = leftAnkle?.visibility?.let { "%.2f".format(it) } ?: "null"
+        val rY = rightAnkle?.y?.let { "%.2f".format(it) } ?: "null"
+        val rConf = rightAnkle?.visibility?.let { "%.2f".format(it) } ?: "null"
+
+        logDebug("LUNGE_VIS_GATE: t=${poseResult.timestampMs}ms | status=${result.status} | reasons=${result.failureReasons} | L_ankle(y=$lY, conf=$lConf) | R_ankle(y=$rY, conf=$rConf)")
+
+        return result
     }
 
     fun getSessionVisibilityStatus(): VisibilityStatus {

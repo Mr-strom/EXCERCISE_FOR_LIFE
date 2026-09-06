@@ -42,6 +42,9 @@ internal class LungeStateMachine(
     var activeFrontLeg: LungeGeometry.LegSide = LungeGeometry.LegSide.LEFT
         private set
 
+    var awaitingTopExtension: Boolean = false
+        private set
+
     private var isRepInProgress = false
     private var reachedBottom = false
     private var minKneeAngleThisRep = 180.0f
@@ -122,9 +125,12 @@ internal class LungeStateMachine(
         isVisibilitySufficient: Boolean = true,
         frontLeg: LungeGeometry.LegSide = activeFrontLeg
     ): ExerciseState {
+        logDebug("LUNGE_FRAME: t=${timestampMs}ms | leg=$frontLeg | angle=${"%.1f".format(frontKneeAngle)}° | phase=$currentPhase | inProgress=$isRepInProgress | vis=$isVisibilitySufficient | complete=${_completeReps.size} | incomp=${_incompleteReps.size}")
+
         // Enforce Acceptance Criterion #3: Visibility gap mid-rep discards in-progress rep
         if (!isVisibilitySufficient) {
             if (isRepInProgress) {
+                logDebug("[VISIBILITY_DISCARD] Attempt discarded mid-rep at t=${timestampMs}ms | minAngleReached=${"%.1f".format(minKneeAngleThisRep)}° | wasPhase=$currentPhase | NOT counted as complete or incomplete")
                 isRepInProgress = false
                 reachedBottom = false
                 minKneeAngleThisRep = 180.0f
@@ -132,6 +138,8 @@ internal class LungeStateMachine(
                 repStartTimestampMs = 0L
                 bottomTimestampMs = 0L
                 reversalCandidateTimestampMs = 0L
+                // D13: Require user to prove full standing extension before re-arming next rep
+                awaitingTopExtension = true
             }
             currentPhase = ExercisePhase.TOP
             val state = ExerciseState(
@@ -162,8 +170,17 @@ internal class LungeStateMachine(
                 maxAngleInAscending = 0.0f
                 reversalCandidateTimestampMs = 0L
 
-                // User starts descending below top threshold with 5° buffer (< 155°)
-                if (frontKneeAngle < (topThreshold - 5.0f)) {
+                // D13 Top Re-Arming Guard: If recovering from a visibility gap, require full standing extension
+                // before arming the next repetition attempt. Prevents phantom incomplete reps during ascent.
+                if (awaitingTopExtension) {
+                    if (frontKneeAngle >= (topThreshold - 5.0f)) { // >= 155°
+                        awaitingTopExtension = false
+                        logDebug("[TOP_GUARD] Standing extension restored (${frontKneeAngle}° >= 155°). Re-armed for next rep.")
+                    } else {
+                        logDebug("[TOP_GUARD] Suppressing rep start during post-visibility recovery (angle=${frontKneeAngle}° < 155°)")
+                    }
+                } else if (frontKneeAngle < (topThreshold - 5.0f)) {
+                    // User starts descending below top threshold with 5° buffer (< 155°)
                     currentPhase = ExercisePhase.DESCENDING
                     isRepInProgress = true
                     reachedBottom = false
@@ -357,5 +374,6 @@ internal class LungeStateMachine(
         repStartTimestampMs = 0L
         bottomTimestampMs = 0L
         reversalCandidateTimestampMs = 0L
+        awaitingTopExtension = false
     }
 }

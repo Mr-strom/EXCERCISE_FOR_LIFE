@@ -202,6 +202,12 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 Log.d("SquatStateMachine", msg)
             }
         }
+        // Debug logging for Lunge if explicitly requested via intent
+        if (exerciseId == "lunge" && intent.getBooleanExtra("EXTRA_ENABLE_DEBUG_LOGGING", false)) {
+            analyzer.setLungeDebugLogging(true) { msg ->
+                Log.d("LungeDebug", msg)
+            }
+        }
 
         // Start live camera stream
         cameraCapturePipeline.startCamera(this, previewView)
@@ -222,11 +228,6 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // 3. Feed into full SDK analysis pipeline
         val frameResult = analyzer.analyzePose(poseResult)
-
-        if (exerciseId == "squat") {
-            val kneeAngle = com.example.cvassessment.sdk.statemachine.SquatGeometry.computeKneeAngle(poseResult.landmarks)
-            Log.d(TAG, "SQUAT_LIVE: t=${timestampMs}ms | knee=${"%.1f".format(kneeAngle)}° | status=${frameResult.status} | reps=${frameResult.currentReps}")
-        }
 
         val isFront = (cameraCapturePipeline.currentLensFacing == CameraSelector.LENS_FACING_FRONT)
 
@@ -284,24 +285,33 @@ class LiveAnalysisActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             // 4. Rep Counter (large, clear) & Completed Rep Metrics (ROM / TuT / Form upon completion)
-            if (frameResult.status == ValidationStatus.INSUFFICIENT_VISIBILITY) {
+            val isVisibilityInsufficient = (frameResult.status == ValidationStatus.INSUFFICIENT_VISIBILITY)
+            val isVisibilityWarningActive = (isVisibilityInsufficient || guidanceResult.isWarning)
+
+            if (isVisibilityInsufficient) {
                 // Per R7 refusal rule: Do not force or display unreliable metrics
                 tvRepCounter.text = "--"
             } else {
                 val currentReps = frameResult.currentReps ?: 0
                 tvRepCounter.text = currentReps.toString()
 
-                // When a rep completes, update ROM/TuT/Form numbers (not live per-frame spam)
-                if (currentReps > lastCompletedRepCount) {
+                // When a rep completes under valid visibility, update ROM/TuT/Form numbers
+                if (currentReps > lastCompletedRepCount && !isVisibilityWarningActive) {
                     lastCompletedRepCount = currentReps
                     val latestRep = analyzer.latestCompletedRepMetrics
                     if (latestRep != null) {
                         val formScore = analyzer.getRepFormScore(currentReps)
                         val tutStr = String.format(Locale.US, "%.1f", latestRep.tutFactor)
                         tvCompletedRepMetrics.text = "Rep $currentReps: ROM ${latestRep.romPercent.toInt()}% • TuT ${tutStr}x • Form $formScore%"
-                        tvCompletedRepMetrics.visibility = View.VISIBLE
                     }
                 }
+            }
+
+            // D13: Enforce R7 UI metric freezing: Hide completed rep metrics during active visibility failure or guidance warning
+            if (isVisibilityWarningActive) {
+                tvCompletedRepMetrics.visibility = View.GONE
+            } else if (lastCompletedRepCount > 0 && tvCompletedRepMetrics.text.isNotEmpty()) {
+                tvCompletedRepMetrics.visibility = View.VISIBLE
             }
 
             // 5. Form Rule Audio & Banner Feedback

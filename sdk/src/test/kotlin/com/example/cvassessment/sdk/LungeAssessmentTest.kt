@@ -4,11 +4,14 @@ import com.example.cvassessment.sdk.form.LungeFormRuleEngine
 import com.example.cvassessment.sdk.form.LungeFormRules
 import com.example.cvassessment.sdk.metrics.RepMetrics
 import com.example.cvassessment.sdk.output.OutputGate
+import com.example.cvassessment.sdk.pose.PoseEstimationResult
 import com.example.cvassessment.sdk.pose.PoseLandmark
 import com.example.cvassessment.sdk.pose.PoseLandmarkType
 import com.example.cvassessment.sdk.statemachine.ExercisePhase
 import com.example.cvassessment.sdk.statemachine.LungeGeometry
 import com.example.cvassessment.sdk.statemachine.LungeStateMachine
+import com.example.cvassessment.sdk.visibility.LungeVisibilityGate
+import com.example.cvassessment.sdk.visibility.VisibilityStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -559,5 +562,74 @@ class LungeAssessmentTest {
                 diffOutput.isEmpty()
             )
         }
+    }
+
+    /**
+     * D13 Regression Test: Visibility gap during descent + recovery ascent does NOT produce a phantom incomplete rep.
+     * Simulates athlete descending into lunge, losing visibility mid-rep (foot leaves frame),
+     * regaining visibility while standing back up (knee angle 115°), and finishing ascent to 165°.
+     */
+    @Test
+    fun testD13_VisibilityGapDuringDescentRecoveryAscentProducesNoPhantomIncompleteRep() {
+        val stateMachine = LungeStateMachine()
+
+        // 1. Initial standing position at TOP (165°)
+        stateMachine.processAngle(frontKneeAngle = 165.0f, timestampMs = 1000L, isVisibilitySufficient = true)
+
+        // 2. Descend into lunge (reaches 110°)
+        stateMachine.processAngle(frontKneeAngle = 140.0f, timestampMs = 1300L, isVisibilitySufficient = true)
+        stateMachine.processAngle(frontKneeAngle = 110.0f, timestampMs = 1600L, isVisibilitySufficient = true)
+        assertTrue("Lunge should be in progress", stateMachine.currentState.isRepInProgress)
+
+        // 3. Visibility drops mid-rep (e.g. backward foot cut off at frame bottom)
+        stateMachine.processAngle(frontKneeAngle = 100.0f, timestampMs = 1900L, isVisibilitySufficient = false)
+        assertEquals("In-progress rep discarded on visibility drop", 0, stateMachine.completeReps.size)
+        assertEquals("Discarded rep must NOT be counted as incomplete", 0, stateMachine.incompleteReps.size)
+        assertTrue("awaitingTopExtension must be armed", stateMachine.awaitingTopExtension)
+
+        // 4. Visibility restored 300ms later while athlete is mid-recovery (knee angle is 115°!)
+        stateMachine.processAngle(frontKneeAngle = 115.0f, timestampMs = 2200L, isVisibilitySufficient = true)
+        assertFalse("Must NOT initiate new rep attempt at 115° during recovery", stateMachine.currentState.isRepInProgress)
+        assertEquals("Must remain in TOP phase waiting for extension", ExercisePhase.TOP, stateMachine.currentState.phase)
+
+        // 5. Athlete finishes standing up (115° -> 135° -> 165°)
+        stateMachine.processAngle(frontKneeAngle = 135.0f, timestampMs = 2500L, isVisibilitySufficient = true)
+        stateMachine.processAngle(frontKneeAngle = 165.0f, timestampMs = 2800L, isVisibilitySufficient = true)
+
+        assertEquals("Zero complete reps after recovery", 0, stateMachine.completeReps.size)
+        assertEquals("CRITICAL D13: ZERO phantom incomplete reps flagged during recovery ascent", 0, stateMachine.incompleteReps.size)
+        assertFalse("awaitingTopExtension cleared upon reaching standing extension", stateMachine.awaitingTopExtension)
+
+        // 6. Next clean rep executed from standing position completes normally
+        stateMachine.processAngle(frontKneeAngle = 140.0f, timestampMs = 3200L, isVisibilitySufficient = true)
+        stateMachine.processAngle(frontKneeAngle = 90.0f, timestampMs = 3600L, isVisibilitySufficient = true)
+        stateMachine.processAngle(frontKneeAngle = 130.0f, timestampMs = 4000L, isVisibilitySufficient = true)
+        stateMachine.processAngle(frontKneeAngle = 165.0f, timestampMs = 4400L, isVisibilitySufficient = true)
+
+        assertEquals("Clean rep successfully detected after re-arming", 1, stateMachine.completeReps.size)
+        assertEquals("Incomplete reps remains 0", 0, stateMachine.incompleteReps.size)
+    }
+
+    /**
+     * D13 Test: Strict ankle gating flags INSUFFICIENT_VISIBILITY when ankle exceeds y >= 0.92 cutoff.
+     */
+    @Test
+    fun testD13_StrictAnkleGatingFlagsCutoff() {
+        val visGate = LungeVisibilityGate()
+
+        val cutOffLandmarks = listOf(
+            PoseLandmark(PoseLandmarkType.LEFT_SHOULDER, "LEFT_SHOULDER", 0.45f, 0.25f, 0.0f, 0.95f),
+            PoseLandmark(PoseLandmarkType.RIGHT_SHOULDER, "RIGHT_SHOULDER", 0.55f, 0.25f, 0.0f, 0.95f),
+            PoseLandmark(PoseLandmarkType.LEFT_HIP, "LEFT_HIP", 0.45f, 0.50f, 0.0f, 0.90f),
+            PoseLandmark(PoseLandmarkType.RIGHT_HIP, "RIGHT_HIP", 0.55f, 0.50f, 0.0f, 0.90f),
+            PoseLandmark(PoseLandmarkType.LEFT_KNEE, "LEFT_KNEE", 0.42f, 0.70f, 0.0f, 0.85f),
+            PoseLandmark(PoseLandmarkType.RIGHT_KNEE, "RIGHT_KNEE", 0.58f, 0.75f, 0.0f, 0.85f),
+            PoseLandmark(PoseLandmarkType.LEFT_ANKLE, "LEFT_ANKLE", 0.40f, 0.85f, 0.0f, 0.85f),
+            // Right ankle is cut off at y=0.94 (>= ankleCutoffY 0.92f)
+            PoseLandmark(PoseLandmarkType.RIGHT_ANKLE, "RIGHT_ANKLE", 0.60f, 0.94f, 0.0f, 0.80f)
+        )
+        val result = visGate.checkFrame(PoseEstimationResult(cutOffLandmarks, hasPose = true, timestampMs = 1000L))
+        assertEquals("Cutoff ankle must trigger INSUFFICIENT_VISIBILITY", VisibilityStatus.INSUFFICIENT_VISIBILITY, result.status)
+        assertTrue(result.failureReasons.contains(com.example.cvassessment.sdk.visibility.VisibilityFailureReason.BODY_OUT_OF_FRAME))
     }
 }

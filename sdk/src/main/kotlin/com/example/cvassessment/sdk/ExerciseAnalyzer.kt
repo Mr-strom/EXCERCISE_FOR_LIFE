@@ -82,6 +82,16 @@ class ExerciseAnalyzer(
     }
 
     /**
+     * Enables or disables temporary debug logging in LungeStateMachine and LungeVisibilityGate.
+     */
+    fun setLungeDebugLogging(enabled: Boolean, logger: ((String) -> Unit)? = null) {
+        lungeStateMachine.isDebugLoggingEnabled = enabled
+        lungeStateMachine.debugLogger = logger
+        lungeVisibilityGate.isDebugLoggingEnabled = enabled
+        lungeVisibilityGate.debugLogger = logger
+    }
+
+    /**
      * Process an individual camera frame with timestamp.
      * Runs full pipeline: pose -> visibility -> state machine -> metrics -> form rules -> output gate.
      */
