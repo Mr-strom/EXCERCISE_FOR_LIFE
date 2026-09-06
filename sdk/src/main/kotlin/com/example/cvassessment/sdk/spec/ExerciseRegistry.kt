@@ -13,7 +13,8 @@ object ExerciseRegistry {
     private val configs: Map<String, ExerciseConfig> = mapOf(
         ExerciseConfig.PUSH_UP.exerciseId to ExerciseConfig.PUSH_UP,
         ExerciseConfig.SQUAT.exerciseId to ExerciseConfig.SQUAT,
-        ExerciseConfig.BICEP_CURL.exerciseId to ExerciseConfig.BICEP_CURL
+        ExerciseConfig.BICEP_CURL.exerciseId to ExerciseConfig.BICEP_CURL,
+        ExerciseConfig.SHOULDER_PRESS.exerciseId to ExerciseConfig.SHOULDER_PRESS
     )
 
     /**

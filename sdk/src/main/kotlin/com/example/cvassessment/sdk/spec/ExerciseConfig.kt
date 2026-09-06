@@ -245,6 +245,76 @@ data class ExerciseConfig(
         )
 
         /**
+         * Canonical Shoulder Press specification from EXERCISE_SPEC.md.
+         *
+         * - category: dynamic_rep
+         * - primaryLandmarks: [shoulders, elbows, wrists, hips]
+         * - trackedAngles: [elbow_angle, shoulder_elevation_angle]
+         * - phases: bottom (elbow_angle ~90°, wrists near shoulder height) -> top (arms extended overhead, elbow_angle > 155° ± 10°) -> bottom
+         * - romDefinition: shoulder_elevation_angle range; 100% = wrists reaching above head landmark
+         * - tutBaseline: 1.5s up + 1.5s down = 3.0s/rep
+         * - cameraNotes: "front or side both viable; elevated camera angle improves overhead ROM tracking"
+         */
+        val SHOULDER_PRESS = ExerciseConfig(
+            exerciseId = "shoulder_press",
+            name = "Shoulder Press",
+            category = ExerciseCategory.DYNAMIC_REP,
+            primaryLandmarks = listOf("shoulders", "elbows", "wrists", "hips"),
+            trackedAngles = listOf("elbow_angle", "shoulder_elevation_angle"),
+            phases = mapOf(
+                "bottom" to PhaseCondition(
+                    phaseName = "bottom",
+                    trackedAngleName = "elbow_angle",
+                    comparison = AngleComparison.LESS_THAN,
+                    thresholdAngle = 90.0f,
+                    toleranceDeg = 15.0f
+                ),
+                "top" to PhaseCondition(
+                    phaseName = "top",
+                    trackedAngleName = "elbow_angle",
+                    comparison = AngleComparison.GREATER_THAN,
+                    thresholdAngle = 155.0f,
+                    toleranceDeg = 10.0f
+                )
+            ),
+            romDefinition = RomDefinition(
+                trackedAngleName = "shoulder_elevation_angle",
+                fullExpectedAngle = 170.0f,
+                minimumAcceptablePercent = 60.0f,
+                startingAngle = 80.0f,
+                description = "shoulder_elevation_angle range; 100% = wrists reaching above head landmark"
+            ),
+            tutBaseline = 3.0f,
+            cameraNotes = "front or side both viable; elevated camera angle improves overhead ROM tracking",
+            angleDefinitions = listOf(
+                JointAngleDefinition(
+                    angleName = "elbow_angle",
+                    firstJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    vertexJoint = PoseLandmarkType.LEFT_ELBOW,
+                    lastJoint = PoseLandmarkType.LEFT_WRIST,
+                    description = "Elbow angle (shoulder-elbow-wrist) for overhead extension tracking"
+                ),
+                JointAngleDefinition(
+                    angleName = "shoulder_elevation_angle",
+                    firstJoint = PoseLandmarkType.LEFT_ELBOW,
+                    vertexJoint = PoseLandmarkType.LEFT_SHOULDER,
+                    lastJoint = PoseLandmarkType.LEFT_HIP,
+                    description = "Shoulder elevation angle (elbow-shoulder-hip) for overhead press tracking"
+                )
+            ),
+            requiredLandmarkIndices = listOf(
+                PoseLandmarkType.LEFT_SHOULDER,  // 11
+                PoseLandmarkType.RIGHT_SHOULDER, // 12
+                PoseLandmarkType.LEFT_ELBOW,     // 13
+                PoseLandmarkType.RIGHT_ELBOW,    // 14
+                PoseLandmarkType.LEFT_WRIST,     // 15
+                PoseLandmarkType.RIGHT_WRIST,    // 16
+                PoseLandmarkType.LEFT_HIP,       // 23
+                PoseLandmarkType.RIGHT_HIP       // 24
+            )
+        )
+
+        /**
          * Convenience factory delegating to [ExerciseRegistry.getConfig].
          * Throws [com.example.cvassessment.sdk.UnknownExerciseException] if exerciseId is not registered.
          */

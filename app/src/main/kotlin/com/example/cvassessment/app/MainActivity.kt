@@ -43,6 +43,18 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        val cardShoulderPress = findViewById<View>(R.id.cardShoulderPress)
+        cardShoulderPress.setOnClickListener {
+            SessionDataHolder.selectedExerciseId = "shoulder_press"
+            SessionDataHolder.selectedExerciseName = "Shoulder Press"
+
+            val intent = Intent(this, StartCameraActivity::class.java).apply {
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_ID, "shoulder_press")
+                putExtra(StartCameraActivity.EXTRA_EXERCISE_NAME, "Shoulder Press")
+            }
+            startActivity(intent)
+        }
+
         val cardSquat = findViewById<View>(R.id.cardSquat)
         cardSquat.setOnClickListener {
             SessionDataHolder.selectedExerciseId = "squat"
